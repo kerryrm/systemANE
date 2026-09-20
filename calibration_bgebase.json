@@ -1,0 +1,10 @@
+{
+  "temp": 0.01,
+  "min_sim": 0.7355,
+  "min_margin": 0.05,
+  "k": 16,
+  "mode": "centroid",
+  "use_description": false,
+  "fitted_on": "clinc_oos validation",
+  "keep_in_scope": 0.99
+}

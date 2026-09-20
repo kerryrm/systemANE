@@ -1,0 +1,10 @@
+# runtime (what cascade.py needs)
+coremltools>=9.0
+numpy>=2.0
+transformers==4.46.3     # tokenizer only at runtime
+
+# build-only (build.py; not needed to run)
+torch==2.7.0             # 2.14 untested with coremltools 9.0
+
+# eval-only (evaluate.py / evalset.py)
+datasets>=3.0        # CLINC150

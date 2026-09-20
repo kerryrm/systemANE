@@ -1,0 +1,13 @@
+# build artifacts: regenerate with build.py / build_encoder.py
+encoder.mlpackage/
+tok/
+bge.mlpackage/
+bge_tok/
+bgebase.mlpackage/
+bgebase_tok/
+*.mlmodelc/
+
+.venv/
+__pycache__/
+.DS_Store
+.evalcache/
