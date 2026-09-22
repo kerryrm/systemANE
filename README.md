@@ -164,6 +164,60 @@ A 44% reduction in errors for 160 labels and no training — and it mostly
 dissolves the escalation problem, so tier 2 is called for a handful of inputs
 rather than a sixth of traffic.
 
+## As a server
+
+```sh
+.venv/bin/python serve.py --preload-tickets    # 127.0.0.1:1977
+```
+
+`POST /v1/systemone` is the System One API — the endpoint kev serves from a
+0.8–9B model. One state, a dict of typed questions, all of them answered from a
+single embedding:
+
+```sh
+curl -s localhost:1977/v1/systemone -H 'Content-Type: application/json' -d '{
+  "state": "I have waited three weeks and nobody has replied. I want to cancel.",
+  "questions": {
+    "department": {"type": "choice", "criteria": {
+        "billing": "payments, charges and refunds",
+        "support": "a problem with the product"}},
+    "urgency":    {"type": "score", "criteria": [
+        "calm and polite", "mildly annoyed", "clearly frustrated",
+        "furious and threatening to leave"]},
+    "churn_risk": {"type": "noul", "criteria": {
+        "true": "this customer is about to cancel",
+        "false": "this customer is satisfied and staying"}}}}'
+```
+
+| | req/s | server-side p50 | p95 |
+|---|---|---|---|
+| 1 client, one question | 225 | 2.25 ms | 4.07 ms |
+| 16 clients, one question | **708** | 1.21 ms | 2.56 ms |
+| 16 clients, three questions | 660 (**1,980 decisions/s**) | 1.28 ms | — |
+
+Two things are specific to serving an embedding engine:
+
+**Schemas are compiled, and compiling costs encodes.** An option is a vector
+here, not a string in a prompt, so a question whose options the server has not
+seen costs one encode per option first — 33 ms for the three questions above,
+1.5 ms every time after. Compiled schemas are cached by a hash of their
+criteria.
+
+**Probabilities are uncalibrated unless you have fitted them.** The engine's
+most repeated finding is that thresholds do not transfer between schemas and
+the failure is silent, so a server that accepted any schema and returned
+confident-looking numbers would ship that bug to everyone. Answers carry
+`"calibrated": false` and `"escalate": null` — never `false` — until a
+calibration is registered for that exact question:
+
+```sh
+curl -s localhost:1977/v1/schemas -H 'Content-Type: application/json' \
+  -d '{"question": {...}, "calibration": {"temp":0.036,"min_sim":0.194,"min_margin":0.65}}'
+```
+
+The registration binds to a hash of the criteria. Change one description and it
+is a different set of vectors, so the calibration stops applying and says so.
+
 ## A second dataset, for a number that compares
 
 CLINC is the set this project argues with, but nobody else reports on it. The
@@ -220,6 +274,7 @@ build.py              convert to encoder.mlpackage (verifies against HuggingFace
 build_encoder.py      compile any BERT-architecture encoder (--model, --pooling)
 where.py              per-op device assignment from Core ML's compute planner
 drift.py              fp16 ANE vs fp32 torch, measured on decisions
+serve.py              the System One API over HTTP (stdlib only)
 system1.py            Encoder + Choice / Boolean / Score primitives
 fmserve.py            minimal stdlib client for `fm serve` (tier 2)
 cascade.py            the two-tier demo

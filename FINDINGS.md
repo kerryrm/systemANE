@@ -335,6 +335,52 @@ jevfire is explicit about the same constraint with a 27B model behind it
 answer depends on another's is not expressible here, and no amount of sharing
 the vector changes that.
 
+## Serving it, and making the calibration finding structural
+
+`serve.py` puts the engine behind `POST /v1/systemone`, the API kev serves from
+a 0.8-9B model. Throughput on a laptop, stdlib `http.server`, one lock around
+the encoder because Core ML's `predict` is not re-entrant:
+
+| | req/s | server-side p50 | p95 |
+|---|---|---|---|
+| 1 client, one question | 225 | 2.25 ms | 4.07 ms |
+| 16 clients, one question | **708** | 1.21 ms | 2.56 ms |
+| 32 clients, one question | 666 | 1.27 ms | 2.36 ms |
+| 16 clients, three questions | 660 (**1,980 decisions/s**) | 1.28 ms | — |
+
+It saturates at ~700 req/s by 16 clients, which is the serialised encoder: 1/708
+is 1.41 ms, the single-threaded encode time. The three-question row is the
+`State` result arriving over HTTP — three typed decisions for the price of one
+encode, so decisions/second is 3x requests/second at the same latency.
+
+Two things about serving *this* engine that a prompted model does not have:
+
+**An option is a vector, not a string in a prompt.** A question whose criteria
+the server has not seen must be compiled first, at one encode per option: 33 ms
+for a 3-option choice plus a 4-level score plus a noul, against 1.5 ms once
+cached. Cold cost scales with the *schema*, warm cost does not scale at all.
+
+**The calibration finding is now enforced rather than documented.** Compiled
+schemas are keyed by a hash of their criteria, and a registered calibration is
+keyed the same way. So:
+
+```
+register calibration for {"billing": "payments, charges and refunds", ...}
+  -> answers carry "calibrated": true, "escalate": false
+
+change one word to "payments, charges and returns"
+  -> different hash, different vectors, different schema
+  -> answers carry "calibrated": false, "escalate": null
+```
+
+`escalate` is `null` when uncalibrated, never `false`. This repo has found the
+same bug from four directions -- CLINC's `min_sim` refusing in-scope tickets,
+BGE's similarities overlapping in an uncalibrated schema, the toy temperature
+sweep, MASSIVE having no out-of-scope rows to fit against -- and every time it
+was silent. A server is the first place where it could be made *impossible*
+rather than merely written down, because the server owns the boundary between a
+schema and its thresholds.
+
 ---
 
 # What it cannot do

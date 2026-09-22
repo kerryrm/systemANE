@@ -133,6 +133,26 @@ s.ask(department=route, urgency=anger, churn_risk=at_risk)
 
 </details>
 
+## ~~Serving it~~ — done
+
+`serve.py`, stdlib `http.server`, speaking `POST /v1/systemone` — kev's
+endpoint and message shapes, so it is a drop-in wherever one of those sits.
+**708 req/s at 16 clients on a laptop, 1,980 decisions/s with three questions
+per request**, against decider-2b's published 431 req/s at 64 clients on a
+GH200.
+
+The design decision worth recording: answers carry `"calibrated": false` and
+`"escalate": null` — never `false` — unless a calibration has been registered
+for that exact question, keyed by a hash of its criteria. Change one description
+and it is a different set of vectors, the hash changes, and the calibration
+stops applying and says so. This repo has found the non-transferring-calibration
+bug from four directions and it was silent every time; the server is the first
+place it could be made impossible instead of documented.
+
+Left undone deliberately: no batching of concurrent requests into one encoder
+call (the lock serialises them and ~700 req/s has not been a constraint), and no
+persistence of registered calibrations across restarts.
+
 ---
 
 ## Experiments, in decreasing confidence that they are worth it

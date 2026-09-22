@@ -121,7 +121,23 @@ class Choice:
         min_sim = cal["min_sim"] if min_sim is None else min_sim
         min_margin = cal["min_margin"] if min_margin is None else min_margin
         self.enc, self.labels = encoder, list(options)
-        self.anchors = encoder.embed([options[l] for l in self.labels])
+        # An option is anchored by a description, or by several strings whose
+        # centroid becomes the anchor. Examples beat descriptions decisively --
+        # 16 real utterances per class cut CLINC errors 44% against one
+        # handwritten sentence -- so the list form is the one worth using when
+        # there is any labelled data at all. See FINDINGS.md.
+        texts, spans = [], []
+        for l in self.labels:
+            v = options[l]
+            v = [v] if isinstance(v, str) else list(v)
+            if not v:
+                raise ValueError(f"option {l!r} has no anchor text")
+            spans.append((len(texts), len(texts) + len(v)))
+            texts.extend(v)
+        E = encoder.embed(texts)
+        cen = np.stack([E[a:b].mean(0) for a, b in spans])
+        self.anchors = cen / np.clip(
+            np.linalg.norm(cen, axis=1, keepdims=True), 1e-12, None)
         self.temp, self.min_margin = temp, min_margin
         self.min_prob, self.min_sim = min_prob, min_sim
         self.always_escalate = set(always_escalate)

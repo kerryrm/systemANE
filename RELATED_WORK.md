@@ -207,6 +207,15 @@ For us, N typed questions about one input is **one encode plus N dot products**.
 The caching they engineer is free in an embedding architecture, and we have never
 said so anywhere.
 
+**Both are now done, and the API is theirs.** `State` in `system1.py` and
+`serve.py` behind `POST /v1/systemone` — kev's endpoint, kev's request and
+response shapes. Three typed questions about one input cost one encode and
+25 µs; over HTTP at 16 clients that is 660 req/s, or **1,980 decisions/second**,
+against decider-2b's published 431 req/s at 64 clients on a GH200. Different
+work per decision and not a benchmark either of us agreed to — but the shape of
+the difference is the point: their throughput is bought with a datacenter GPU
+and ours with the observation that the input only needs encoding once.
+
 Their multi-question API is also nicer than ours:
 
 ```
@@ -215,8 +224,8 @@ Their multi-question API is also nicer than ours:
 "churn_risk":  {"noul": 0.892}
 ```
 
-One state, a dict of typed questions, one call. `system1.py` answers one question
-per call. Closing that gap costs us almost nothing.
+One state, a dict of typed questions, one call — which `State.ask()` now does,
+and `serve.py` serves.
 
 ### Scale
 
