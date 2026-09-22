@@ -95,6 +95,28 @@ d     = route("I was charged twice")  # ~1.4 ms
 The output is a distribution over the schema you passed in, so an off-schema
 label is not unlikely — it is unrepresentable.
 
+Several questions about one input cost one encode and nothing else:
+
+```python
+s = State(enc, "I was charged twice for last month")
+s.ask(department=route, urgency=anger, churn_risk=churn)
+# {'department': Decision(label='billing', prob=0.95, ...),
+#  'urgency':    {'score': 1.74, 'confidence': 0.72, ...},
+#  'churn_risk': Decision(label=True, prob=0.81, ...)}
+```
+
+| | ms per ticket |
+|---|---|
+| three questions, three separate calls | 3.46 |
+| three questions, one `State` | **1.13** |
+| the three questions alone, vector already computed | **0.025** |
+
+The encode is 1.10 ms and the three typed decisions on top of it are 25 µs
+together — a fourth question costs about 8 µs. Other engines engineer this:
+kev caches a state representation across questions, Laya batches ten to get the
+per-question cost down. In an embedding architecture it is not an optimisation,
+it is the shape of the thing.
+
 ## Two signals, because there are two ways to not know
 
 | | signal | question it answers |

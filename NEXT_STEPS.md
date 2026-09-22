@@ -91,6 +91,24 @@ vectors, so the failure was silent and total. `Encoder.embed()` now normalises i
 Python. See *The CPU-only path silently drops the normalisation* in
 `FINDINGS.md`.
 
+## ~~5. A multi-question API~~ — done
+
+`State(enc, text)` embeds once; `.ask(name=question, ...)` answers any number of
+typed questions from that vector, and raises if a question was built with a
+different encoder (two encoders are two vector spaces, and mixing them gives
+confident nonsense rather than an error). `Choice`, `Boolean` and `Score` each
+grew a `decide(vec)` alongside `__call__(text)`.
+
+Three questions over sixteen tickets: **3.46 ms/ticket as separate calls, 1.13 ms
+through one `State`, and 0.025 ms for the three questions with the vector already
+computed.** The encode is 1.10 ms and everything else is 25 µs — a fourth
+question costs about 8 µs. Cost is per input, not per decision.
+
+For a masked question, call the primitive against the public vector directly:
+`route.decide(s.vec, allowed=[...])`.
+
+<details><summary>original entry</summary>
+
 ## 5. A multi-question API
 
 kev caches state representations across questions (772-token state: 861 ms →
@@ -112,6 +130,8 @@ s.ask(department=route, urgency=anger, churn_risk=at_risk)
   presents, so it makes the comparison legible.
 * **Risk:** none technically. The risk is scope — resist adding cross-field
   conditioning, which the architecture genuinely cannot do.
+
+</details>
 
 ---
 

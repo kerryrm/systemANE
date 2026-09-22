@@ -5,7 +5,9 @@ text, so it cannot return a label outside the schema you gave it -- that is a
 structural property, not a trained behaviour.
 
 Decisions are "compiled" once (option descriptions embedded up front) and then
-called per input, which is the only part that costs anything at runtime.
+called per input, which is the only part that costs anything at runtime. `State`
+goes one step further: embed an input once and answer every question about it
+from that one vector.
 """
 import json
 import os
@@ -134,7 +136,15 @@ class Choice:
         the legal set. Note that margins widen as the set shrinks, so a
         min_margin fitted on the full schema is conservative under masking.
         """
-        sims = self.enc.embed([text])[0] @ self.anchors.T
+        return self.decide(self.enc.embed([text])[0], allowed=allowed)
+
+    def decide(self, vec, allowed=None):
+        """Same decision from an embedding that has already been computed.
+
+        This is the whole runtime cost of a question: one (d, K) matmul over a
+        vector someone else paid for. See `State`.
+        """
+        sims = vec @ self.anchors.T
         labels = self.labels
         if allowed is not None:
             labels = list(allowed)
@@ -169,7 +179,10 @@ class Boolean(Choice):
         super().__init__(encoder, {"yes": yes, "no": no}, **kw)
 
     def __call__(self, text, allowed=None):
-        d = super().__call__(text, allowed=allowed)
+        return self.decide(self.enc.embed([text])[0], allowed=allowed)
+
+    def decide(self, vec, allowed=None):
+        d = super().decide(vec, allowed=allowed)
         d.label = d.label == "yes"
         return d
 
@@ -188,7 +201,47 @@ class Score:
         self.a = encoder.embed(anchors)
 
     def __call__(self, text):
-        p = _softmax(self.enc.embed([text])[0] @ self.a.T, self.temp)
+        return self.decide(self.enc.embed([text])[0])
+
+    def decide(self, vec):
+        p = _softmax(vec @ self.a.T, self.temp)
         return {"score": float((np.arange(self.n) * p).sum()),
                 "confidence": float(p.max()),
                 "dist": [round(float(x), 3) for x in p]}
+
+
+class State:
+    """One input, embedded once, answered by any number of typed questions.
+
+    Other decision engines engineer this: kev caches a state representation
+    across questions (772 tokens, 861 ms -> 242 ms), Laya batches ten questions
+    to reach ~7.2 ms each against 32.8 ms for one. In an embedding architecture
+    it is not an optimisation, it is the shape of the thing -- N questions about
+    one input is one encode plus N dot products, and the encode is ~1.4 ms
+    against microseconds for the rest.
+
+        s = State(enc, "I was charged twice for last month")
+        s.ask(department=route, urgency=anger, churn_risk=at_risk)
+        # {"department": Decision(label='billing', ...),
+        #  "urgency":    {"score": 1.74, ...},
+        #  "churn_risk": Decision(label=True, ...)}
+
+    Questions must share the encoder this State was built with: two encoders
+    produce two unrelated vector spaces, and comparing across them yields
+    confident nonsense rather than an error. `ask` checks.
+
+    For a masked question, call the primitive directly against the public
+    vector: `route.decide(s.vec, allowed=["billing", "auth"])`.
+    """
+
+    def __init__(self, encoder, text):
+        self.enc, self.text = encoder, text
+        self.vec = encoder.embed([text])[0]
+
+    def ask(self, **questions):
+        for name, q in questions.items():
+            if q.enc is not self.enc:
+                raise ValueError(
+                    f"question {name!r} was built with a different encoder; "
+                    f"its anchors live in another vector space")
+        return {name: q.decide(self.vec) for name, q in questions.items()}

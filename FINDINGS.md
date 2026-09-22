@@ -308,6 +308,33 @@ is the expensive error and rejecting out-of-scope is the cheap win. On test:
 Validation predicted 95.0% / 99%; test delivered 93.6% / 98.3%, so the threshold
 generalises.
 
+## What a question costs, once the input is embedded
+
+`State` embeds an input once and answers every question from that one vector.
+Sixteen support tickets, three questions each — a `Choice` over 5 routes, a
+`Score` over a 4-level rubric, and a `Boolean`:
+
+| | ms per ticket |
+|---|---|
+| three questions, three separate calls | 3.46 |
+| three questions, one `State` | **1.13** |
+| the three questions alone, vector already computed | **0.025** |
+
+**The encode is 1.10 ms; the three typed decisions on top of it are 25 µs.** A
+44:1 ratio, and a fourth question costs about 8 µs — a `(384, K)` matmul and a
+softmax. Cost here is per *input*, not per *decision*, which is a different
+scaling law from every engine in `RELATED_WORK.md`: kev caches a state
+representation across questions to get 861 ms down to 242 ms, Laya batches ten
+questions to reach 7.2 ms each from 32.8 ms. Both are engineering their way
+toward what falls out of an embedding architecture for free.
+
+The limit is the honest half. These questions are independent — each is a dot
+product against its own anchors, and none of them can see another's answer.
+jevfire is explicit about the same constraint with a 27B model behind it
+("fields score independently, no cross-field conditioning"). A question whose
+answer depends on another's is not expressible here, and no amount of sharing
+the vector changes that.
+
 ---
 
 # What it cannot do
