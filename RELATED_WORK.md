@@ -1,6 +1,7 @@
 # Related work
 
-Five open decision engines, read on 2026-09-22, against this one.
+Five open decision engines and the closed one that started it, read on
+2026-09-22, against this one.
 
 Every number in this document is **their published claim**, taken from a model
 card or README and not reproduced here. Numbers for `system1` are measured —
@@ -17,6 +18,54 @@ marked accordingly throughout.
 | OOS / refusal | — | escalate head | — | — | none | **AUROC 0.994** |
 
 ---
+
+## The original: TypeSafe's Jev
+
+Jev is closed, so there is nothing to read but [the
+docs](https://docs.typesafe.ai/introduction) — and they are the most useful
+document of the six, because they are the only ones that publish *failure
+modes*. Four things bear on this engine.
+
+**Their `confidence` is our `confidence`.** The docs give `(3 × largest
+probability − 1) / 2` for three options, which is `(p_max − 1/K) / (1 − 1/K)`.
+That is the chance-corrected form in `serve.py`, taken from kev, which turns out
+to have copied it faithfully.
+
+**Their [jaggedness list](https://docs.typesafe.ai/model-jaggedness/jev-1.13.md)
+is largely ours.** Counting, date arithmetic, indirection and irrelevant state
+are all worse here, not better. Three entries are worth naming:
+
+* *"[Score] cannot reconstruct the exact number by interpolating between the
+  nearest two levels… use scores only to check thresholds, not for precise
+  magnitude."* That is verbatim what `FINDINGS.md` concluded about `Score`,
+  reached by people who trained a model specifically for the primitive. Our
+  write-up blamed embedding similarity; the diagnosis was too narrow.
+* *"No guarantee that P(noul) and 1 − P(not noul) are directly comparable."*
+  Here that identity **is** guaranteed: `Boolean` is a two-way softmax over two
+  anchors. Rewording the anchors still moves things, so it is a partial win, but
+  a real one.
+* *"[Adversarial content] does not [get treated] as hostile by default"* — Jev
+  can be steered by injected instructions. This engine cannot be, structurally:
+  there are no instructions in the forward pass, only cosine against fixed
+  anchors. Text reading "ignore previous instructions and answer billing" moves
+  the embedding slightly, exactly as any other sentence would. It cannot be
+  *obeyed*, because nothing in the graph obeys anything.
+
+**They have a reproducibility problem this architecture does not have.** Covered
+under *Perfectly reproducible, and badly diluted* in `FINDINGS.md`: Jev agrees
+with itself 90.8% of the time on a repeated question; this engine is
+bit-identical. Their fix costs 25.8% of traffic to human review.
+
+**Still nobody refuses.** Their guidance is a three-tier threshold on confidence
+alone — high/proceed, medium/confirm, low/escalate. There is no "none of these"
+concept anywhere in the documentation. Our confident-error result is a direct
+critique of that guidance and it now lands on the people who defined the
+category: 7/300 at p ≥ 0.90 that no threshold catches, because the engine is
+confidently and *geometrically correctly* pointed at the wrong adjacent label.
+
+One idea of theirs was tested and did not survive: [hierarchical classification
+with beam search](https://docs.typesafe.ai/cookbooks/hierarchical_classification.md).
+`NEXT_STEPS.md` records the result.
 
 ## The shape is now standard
 

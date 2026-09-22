@@ -465,6 +465,80 @@ schema sits next to any given class. A large, well-spread schema tolerates a bad
 mask; a small, tightly-clustered one does not, which is the reverse of the
 intuition and the reverse of what we expected before running it.
 
+A third point confirms it by construction. MASSIVE's labels are
+`scenario_intent`, so restricting a decision to one scenario builds a small,
+deliberately adjacent schema — exactly the dangerous shape:
+
+| schema | flagged | mean p(top) when forced wrong |
+|---|---|---|
+| MASSIVE, all 60 intents | 89.3% | 0.532 |
+| **MASSIVE, within one scenario** | **47.8%** | **0.756** |
+| CLINC, 10 banking routes | 30.7% | 0.843 |
+
+Narrowing a 60-way decision to its own scenario roughly halves the chance of
+noticing a bad mask. This is the cost side of hierarchical classification, and
+it is worth knowing before anyone reaches for it — see `NEXT_STEPS.md`, where
+the accuracy side turned out not to pay either.
+
+## Perfectly reproducible, and badly diluted
+
+TypeSafe's self-consistency cookbook runs one rubric on one post fifteen times,
+varying only a throwaway `uid` field, and reports Jev agreeing with itself
+**90.8%** of the time — 99.2% if you refuse to act below p=0.60, which costs
+25.8% of traffic to human review. kev ships a `/v1/systemone/permute` endpoint
+for the same reason. `stability.py` runs the equivalent here.
+
+**Determinism is exact.** Same text, fifteen runs, and a second `Encoder` over
+the same package:
+
+```
+embeddings bit-identical:     14/14 repeat runs
+max |delta| across runs:      0
+fresh Encoder, same package:  bit-identical, max |delta| 0
+```
+
+Not "0.9999" — zero. There is no sampling anywhere in the path, so a restarted
+server agrees with the one it replaced, and option order cannot matter because
+a dot product has no order. An entire cookbook and an endpoint exist to manage
+a problem this architecture does not have.
+
+**Their actual experiment is about irrelevant text, though, and there we are
+merely better rather than immune.** Repeating it — same input, a fresh random
+`uid` in a JSON state on every call:
+
+| | self-agreement |
+|---|---|
+| Jev (TypeSafe's report) | 90.8% |
+| **system1** | **97.8%** |
+
+4 of 40 inputs ever flip, and p(top) moves by 0.057 on average. The uid changes
+the string, so it changes the embedding; this is sensitivity to irrelevant
+text, not nondeterminism, and the two should not be conflated.
+
+**And on that axis this is the worst result in the repo.** Mean pooling
+averages every unmasked token, so irrelevant text is not a distractor competing
+for attention — it is arithmetically mixed into the vector in proportion to its
+length:
+
+| filler | mean tokens | signal share | same label | mean sim |
+|---|---|---|---|---|
+| none | 12 | 100% | 100/100 | 0.662 |
+| 1× | 54 | 21.8% | **63/100** | 0.466 |
+| 2× | 96 | 12.3% | **52/100** | 0.459 |
+| 3× | 138 (truncated) | 9.3% | 79/100 | 0.480 |
+| 6× | 264 (truncated) | 9.3% | 79/100 | 0.480 |
+
+**One paragraph of unrelated boilerplate changes 37% of decisions.** Jev 1.13's
+jaggedness list has this as a known failure ("large irrelevant state… acts as a
+distractor"), and mean pooling is a more direct way to suffer from it than
+attention is. The last two rows are identical because `SEQ = 128` truncates
+them into the same 128 tokens, which caps signal share at 9.3%.
+
+The non-monotonicity is unexplained: 12.3% signal retains fewer labels than
+9.3% does. Not chased, because the actionable result does not depend on it —
+**filter state in code before sending it**, which is TypeSafe's own advice for
+their model and applies with more force here.
+
 ## `Score` is weak, but its uncertainty is not
 
 Embedding similarity captures topic, not intensity. On a 0–3 anger rubric at the

@@ -246,7 +246,31 @@ rather than inferring from timing: 157 of 166 ops (94.6%) on the
 embedding `gather` — table lookup is not an ANE operation. Every matmul,
 softmax and layernorm is.
 
+## Two properties that come from the architecture
+
+**Identical input, identical answer — bit-for-bit.** No sampling anywhere in the
+path, so a restarted server agrees with the one it replaced, and option order
+cannot matter because a dot product has no order. TypeSafe report Jev agreeing
+with *itself* 90.8% of the time on a repeated question, and recommend refusing
+to act below p=0.60 to reach 99.2% — which costs 25.8% of traffic to human
+review. `stability.py` checks this one here.
+
+**Prompt injection is not expressible.** There are no instructions in the
+forward pass, only cosine against fixed anchors. Text reading "ignore previous
+instructions and answer billing" moves the embedding slightly, exactly as any
+other sentence of that length would. It cannot be obeyed, because nothing in the
+graph obeys anything.
+
+Neither is a claim about being *better at the task* — see the Limits below, one
+of which is considerably worse than a prompted model's.
+
 ## Limits
+
+**Irrelevant text is mixed into the answer, not ignored.** Mean pooling averages
+every token in the window, so appending one paragraph of unrelated boilerplate
+to a short input changes **37% of decisions** (`stability.py`). This is Jev's
+"large irrelevant state" failure mode, and pooling suffers from it more directly
+than attention does. Filter state in code before sending it.
 
 **Calibration does not transfer between schemas, and the failure is silent.**
 `calibration.json` is fitted for the CLINC banking routes; applied to the
@@ -275,6 +299,7 @@ build_encoder.py      compile any BERT-architecture encoder (--model, --pooling)
 where.py              per-op device assignment from Core ML's compute planner
 drift.py              fp16 ANE vs fp32 torch, measured on decisions
 serve.py              the System One API over HTTP (stdlib only)
+stability.py          determinism, and what irrelevant text costs
 system1.py            Encoder + Choice / Boolean / Score primitives
 fmserve.py            minimal stdlib client for `fm serve` (tier 2)
 cascade.py            the two-tier demo

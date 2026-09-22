@@ -153,6 +153,47 @@ Left undone deliberately: no batching of concurrent requests into one encoder
 call (the lock serialises them and ~700 req/s has not been a constraint), and no
 persistence of registered calibrations across restarts.
 
+## Hierarchical classification — tested, does not pay
+
+TypeSafe's cookbook walks a taxonomy with beam search, ranking paths by
+`prod(edge_probabilities) ** (1 / decisions)`. MASSIVE's labels are
+`scenario_intent` — 18 scenarios over 60 intents — and our confident errors were
+51.6% within-scenario, so this looked like the obvious fix. It is not.
+
+| | accuracy |
+|---|---|
+| **flat 60-way** | **0.7165** |
+| hierarchical greedy | 0.6476 |
+| hierarchical beam, K=3 | 0.6644 |
+| greedy, better scenario anchors | 0.6759 |
+| soft, marginalised over scenarios | 0.6883 |
+| *oracle: perfect scenario, then intent* | *0.8376* |
+
+(Flat is 0.7165 here against the published 0.710 because this experiment samples
+its own anchors; every row shares that sampling, so the comparison is internally
+consistent.)
+
+Level 1 is the bottleneck — picking the scenario is only 76.3% accurate, 79.4%
+with anchors built from the intent centroids rather than pooled examples. A
+scenario is an abstract grouping of heterogeneous utterances, which is the
+description-anchor problem again.
+
+**The decisive row is the soft one.** Marginalising over scenarios instead of
+committing — `p(intent) = p(scenario) × p(intent | scenario)` — cannot suffer
+from an early mistake, because it does not make one. It still loses to flat by
+2.8 points. So this is not a cascade-brittleness problem that beam search or a
+wider beam would fix: **the hierarchy is simply the wrong prior.** The oracle row
+shows the ceiling is real (+12 points over flat) and entirely out of reach.
+
+Two things worth keeping from it. Their `separation = top_path / second_path`
+does work as a signal — 6.04 on correct answers against 1.81 on wrong ones. And
+the robustness cost is real and was predicted: restricting a decision to one
+scenario is the small-adjacent-schema shape, and it halves how often a wrong
+mask gets flagged (89.3% → 47.8%). See *Masking is a correctness assumption* in
+`FINDINGS.md`.
+
+Not pursued further, and the script was not kept.
+
 ---
 
 ## Experiments, in decreasing confidence that they are worth it
