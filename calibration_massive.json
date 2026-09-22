@@ -1,0 +1,11 @@
+{
+  "temp": 0.0469,
+  "min_sim": 0.1765,
+  "min_margin": 0.85,
+  "k": 16,
+  "mode": "centroid",
+  "use_description": false,
+  "fitted_on": "massive validation",
+  "oos_validated": false,
+  "keep_in_scope": 0.99
+}

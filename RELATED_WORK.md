@@ -60,11 +60,18 @@ Highest value per hour of anything here.
 
 ### 2. An externally comparable benchmark
 
-Laya publishes MASSIVE-intent **0.783** at 421M parameters. We publish CLINC150
-**0.933** at 22.6M. Different datasets, different splits, not comparable — but
-MASSIVE is the same task shape and `evalset.py` already does this kind of
-loading. Right now we have no external reference point at all, which means the
-headline number cannot be placed against anything.
+**Done — `massive.py`, and the number is 0.710.** Laya publishes MASSIVE-intent
+**0.783** at 421M parameters with an RL training stage. The same engine on the
+same dataset, 22.6M parameters and nothing trained, gets **0.710** (2,974 test
+items, ECE 0.032).
+
+7.3 points behind at 19× smaller, untrained, and at 1.4 ms against their 32.8 ms
+on a T4. Their split and harness are their own, so this is two measurements of
+the same dataset rather than a head-to-head — but it is the first time this
+engine's accuracy has had anything external to sit beside.
+
+MASSIVE has no out-of-scope class, so it says nothing about refusal, which is
+the axis CLINC was chosen for. `FINDINGS.md` has the full comparison.
 
 ### 3. Chance-corrected confidence, and entropy
 

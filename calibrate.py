@@ -15,7 +15,7 @@ import numpy as np
 
 import anchors as A
 import evalset
-from evalset import OOS, ROUTES
+from evalset import OOS
 from system1 import Encoder, _softmax
 
 
@@ -49,15 +49,21 @@ def main():
     ap.add_argument("--k", type=int, default=16, help="train examples per class")
     ap.add_argument("--mode", default="centroid", choices=["centroid", "max"])
     ap.add_argument("--no-description", action="store_true")
+    ap.add_argument("--dataset", default="clinc", choices=["clinc", "massive"],
+                    help="clinc = evalset.py (10 routes + OOS); massive = 60 intents, no OOS")
     ap.add_argument("--encoder", default="encoder",
                     help="basename: <name>.mlpackage + <name>_tok/ (or tok/)")
     ap.add_argument("--out", default="calibration.json")
     args = ap.parse_args()
+    import importlib
+    ds = importlib.import_module(
+        {'clinc': 'evalset', 'massive': 'massive'}[args.dataset])
 
-    rows = evalset.load("validation")
-    print(f"validation: {evalset.summary(rows)}\n")
+    rows = ds.load("validation")
+    print(f"{args.dataset} validation: {ds.summary(rows)}\n")
     enc = _encoder(args.encoder)
-    an = A.build(enc, k=args.k, mode=args.mode, use_description=not args.no_description)
+    an = A.build(enc, k=args.k, mode=args.mode,
+                 use_description=not args.no_description, ds=ds)
     labels = an.labels
     print(f"anchors: k={args.k} mode={args.mode} "
           f"description={not args.no_description}\n")
@@ -81,11 +87,23 @@ def main():
               f"vs acc {corr.mean():.3f}{tag}")
 
     # -- min_sim, to a target in-scope retention ---------------------------
+    # The quantile is well defined without out-of-scope data, but it is only a
+    # *threshold*, not a demonstrated separation: nothing has shown that real
+    # out-of-scope input falls below it. Say so rather than writing a number
+    # that looks fitted. This is the failure mode in FINDINGS.md's "Fitting the
+    # demo schema" -- a min_sim that rejects nothing, discovered too late.
     maxsim = sims.max(1)
     cut = float(np.quantile(maxsim[ins], 1.0 - args.keep_in_scope))
-    rejected = (maxsim[~ins] < cut).mean()
-    print(f"\nfitted min_sim          {cut:.4f}   "
-          f"(keeps {args.keep_in_scope:.0%} in-scope, rejects {rejected:.1%} of out-of-scope)")
+    n_oos = int((~ins).sum())
+    if n_oos:
+        rejected = (maxsim[~ins] < cut).mean()
+        print(f"\nfitted min_sim          {cut:.4f}   "
+              f"(keeps {args.keep_in_scope:.0%} in-scope, rejects {rejected:.1%} of out-of-scope)")
+    else:
+        print(f"\nmin_sim                 {cut:.4f}   "
+              f"(keeps {args.keep_in_scope:.0%} in-scope)")
+        print(f"  WARNING: {args.dataset} has no out-of-scope rows. This threshold is")
+        print(f"  an in-scope quantile only -- nothing here shows it rejects anything.")
 
     # -- min_margin, to a target in-scope error rate ----------------------
     # margin is post-softmax, so it is only meaningful at the fitted
@@ -110,7 +128,9 @@ def main():
                "min_margin": best,
                "k": args.k, "mode": args.mode,
                "use_description": not args.no_description,
-               "fitted_on": "clinc_oos validation", "keep_in_scope": args.keep_in_scope},
+               "fitted_on": f"{args.dataset} validation",
+               "oos_validated": bool(n_oos),
+               "keep_in_scope": args.keep_in_scope},
               open(args.out, "w"), indent=2)
     print(f"\nwrote {args.out} — evaluate.py and Choice() read it by default")
 

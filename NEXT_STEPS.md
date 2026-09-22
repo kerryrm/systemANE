@@ -47,23 +47,28 @@ Then re-run the escalation curve on each and see which thresholds more cleanly.
 * **Do not** remove `margin`. The fitted `min_margin` values in the tracked
   `calibration*.json` files depend on it.
 
-## 3. MASSIVE, for an externally comparable number
+## ~~3. MASSIVE, for an externally comparable number~~ — done
 
-We have no external reference point. CLINC150 at 0.933 is a good number with
-nothing to sit beside it; Laya publishes MASSIVE-intent 0.783 at 421M parameters,
-and MASSIVE is the same task shape.
+`massive.py` loads `mteb/amazon_massive_intent`; `--dataset massive` runs the
+existing scripts against it. **0.710 accuracy on 2,974 test items, ECE 0.032**,
+same encoder, k=16 centroids, nothing trained — against Laya's published 0.783
+at 421M parameters with an RL stage. Reported as two measurements of one
+dataset, not a head-to-head.
 
-`evalset.py` already does CLINC loading and splitting, so this is mostly a second
-loader plus a fitted calibration of its own.
+It also revised two earlier findings, both against the intuition:
 
-* **Effort:** a day.
-* **What it buys:** the ability to say where a 22.6M-parameter untrained engine
-  lands against a 421M-parameter trained one, on a dataset neither of us chose.
-* **Negative result:** we do far worse on 60 intents than on 150, which would say
-  something real about MASSIVE's intent granularity rather than about us. Either
-  way the number goes in the README.
-* **Honesty constraint:** their split and harness are not ours. Report it as "our
-  measurement on MASSIVE", never as a head-to-head.
+* **Masking robustness is about neighbour density, not label count.** CLINC's 10
+  adjacent banking routes flag 30.7% of forced-wrong decisions; MASSIVE's 60
+  intents flag **89.3%**. The bigger schema is far safer under a wrong mask,
+  because its classes are spread over 18 scenarios rather than packed into one
+  domain.
+* **The confident-error share barely moved** (2.3% → 2.2%) despite a 22-point
+  accuracy drop, because the engine gets confident about far fewer inputs on the
+  harder task (37% vs 88% reach p ≥ 0.90) and is wrong more often when it does.
+  That is calibration working across datasets.
+
+The prediction going in — that 60 classes would crowd more than 10 and produce
+more undetectable errors — was wrong in both directions.
 
 ## 4. Decision drift over the whole eval set, not ten fixtures
 

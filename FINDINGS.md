@@ -95,6 +95,83 @@ on the paths that have fitted thresholds. Better on the benchmark, not
 automatically better in place — the same lesson as calibration not transferring
 between schemas, arriving from a different direction.
 
+## A second dataset: MASSIVE
+
+CLINC is the dataset this project argues with, because it ships an explicit
+out-of-scope class. It is also a dataset nobody else reports on, and the 10-way
+banking router in `evalset.py` is a schema of our own carving — so the headline
+number has had nothing to sit beside it. `massive.py` adds
+`mteb/amazon_massive_intent`, which other decision models do publish on.
+
+Same engine, same encoder, same k=16 centroids, no training, no descriptions:
+
+| | CLINC (ours, 10-way) | MASSIVE (60-way) |
+|---|---|---|
+| in-scope accuracy | 0.933 | **0.710** |
+| ECE | 0.041 | **0.032** |
+| test items | 300 | 2,974 |
+| validation → test | 0.965 → 0.933 | 0.725 → 0.710 |
+
+**0.710 on 60 intents from a 22.6M-parameter encoder with nothing trained.** For
+reference, Laya reports 0.783 on MASSIVE intent from 421M parameters with an RL
+training stage — 7.3 points ahead at 19× the size. That is their number on their
+harness and split, not a head-to-head; see `RELATED_WORK.md`. The
+validation-to-test gap is 1.5 points against CLINC's 3.2, which is what a
+ten-times-larger test set buys.
+
+Two things do not transfer, and both are the dataset's doing rather than the
+engine's:
+
+* **Refusal cannot be measured here at all.** MASSIVE has no out-of-scope class,
+  so OOS AUROC, the operating curve and `min_sim` are all unavailable.
+  `calibrate.py` still emits a `min_sim` quantile and now prints a warning
+  saying it is an in-scope quantile that has been shown to reject nothing, and
+  records `oos_validated: false` in the JSON. The 0.994 in `README.md` is
+  CLINC's and stays CLINC's.
+* **Two classes cannot supply k=16.** MASSIVE's train split ranges from 810
+  examples to 4, so `music_dislikeness` and `cooking_query` contribute what they
+  have. 59 of the 60 intents appear in validation and test.
+
+## What MASSIVE says about confident errors
+
+The prediction going in was that a 60-way schema would be *more* crowded than a
+10-way one and would therefore produce more undetectable errors. **It did not.**
+The share is essentially identical:
+
+| | CLINC | MASSIVE |
+|---|---|---|
+| wrong at p ≥ 0.90, share of in-scope | 2.3% (7/300) | **2.2% (64/2,974)** |
+| of those, flagged by the gates | 0/7 | **5/64** |
+| error rate *among* confident items | 0.026 | 0.059 |
+| items reaching p ≥ 0.90 | 265/300 (88%) | 1,090/2,974 (37%) |
+
+The matching top line is a coincidence of the bottom two moving in opposite
+directions. On the harder task the engine is confident about far fewer inputs
+(37% against 88%) and wrong more often when it is (0.059 against 0.026). Those
+cancel. **What survives is that calibration is doing its job** — confidence
+tracks difficulty across a 22-point accuracy gap — and that the gates still
+catch almost nothing: 59 of 64 confident errors are silent, against 7 of 7.
+
+The confusions are adjacency again, and more so among the confident ones. MASSIVE
+intents carry a scenario prefix (`calendar_`, `email_`, `iot_`), which makes
+adjacency checkable rather than a matter of opinion:
+
+```
+                            within-scenario
+all 863 errors                 42.4%
+the 64 confident errors        51.6%
+
+   8  email_sendemail  -> email_addcontact
+   6  general_quirky   -> general_greet
+   5  transport_query  -> transport_ticket
+   2  cooking_recipe   -> cooking_query
+```
+
+So the *rate* of confident error is not a function of how many classes there are.
+It is a function of how many **neighbours** each class has, and MASSIVE's 60
+intents are spread across 18 scenarios rather than packed into one domain the way
+our ten banking routes are.
+
 ---
 
 # Making confidence mean something
@@ -293,6 +370,27 @@ that look like it.
 **If your mask is wrong, the engine will comply without complaint.** A mask
 derived from structure (a checkbox cannot accept typed text) is safe; a
 heuristic mask is exposed.
+
+**But 30.7% is a property of this schema, not of the method.** The same test on
+MASSIVE's 60 intents flags **89.3%** of forced-wrong decisions, at a mean
+confidence of 0.532 against 0.843:
+
+| | CLINC, 10 banking routes | MASSIVE, 60 intents |
+|---|---|---|
+| flagged rather than silently mislabelled | 30.7% | **89.3%** |
+| mean p(top) on forced-wrong decisions | 0.843 | **0.532** |
+
+The direction is the opposite of the obvious one: the schema with **six times as
+many labels is far safer under a wrong mask.** Masking `balance` out of ten
+adjacent banking intents leaves `transactions` and `credit_limit`, which look
+close enough to be answered confidently. Masking `alarm_set` out of sixty
+intents spread over eighteen scenarios leaves nothing nearby, the similarities
+collapse, and the gates fire.
+
+So the risk is not label count. It is **neighbour density** — how much of the
+schema sits next to any given class. A large, well-spread schema tolerates a bad
+mask; a small, tightly-clustered one does not, which is the reverse of the
+intuition and the reverse of what we expected before running it.
 
 ## `Score` is weak, but its uncertainty is not
 

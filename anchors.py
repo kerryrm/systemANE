@@ -6,11 +6,14 @@ before reaching for fine-tuning.
 
 Examples are drawn from the *train* split only. Selection happens on
 validation. Test is never involved.
+
+`ds` is the dataset module -- `evalset` (CLINC150) or `massive` -- which
+supplies ROUTES and load(). It defaults to evalset so existing callers are
+unchanged.
 """
 import numpy as np
 
 import evalset
-from evalset import OOS, ROUTES
 
 
 class Anchors:
@@ -33,8 +36,8 @@ class Anchors:
         return np.stack([(E @ m.T).max(1) for m in self.mats], axis=1)
 
 
-def _train_examples(k, seed=0):
-    rows = evalset.load("train", include_oos=False)
+def _train_examples(k, seed=0, ds=evalset):
+    rows = ds.load("train", include_oos=False)
     by = {}
     for text, label in rows:
         by.setdefault(label, []).append(text)
@@ -46,16 +49,18 @@ def _train_examples(k, seed=0):
     return out
 
 
-def build(enc, k=0, mode="centroid", use_description=True, seed=0, cache=None):
-    """Anchors for ROUTES. k=0 with use_description reproduces the baseline."""
-    labels = list(ROUTES)
-    ex = _train_examples(k, seed) if k else {l: [] for l in labels}
+def build(enc, k=0, mode="centroid", use_description=True, seed=0, cache=None,
+          ds=evalset):
+    """Anchors for ds.ROUTES. k=0 with use_description is the baseline."""
+    labels = list(ds.ROUTES)
+    ex = _train_examples(k, seed, ds) if k else {l: [] for l in labels}
     mats = []
     for l in labels:
         vecs = []
         if use_description:
-            vecs.append(cache[ROUTES[l]] if cache else enc.embed([ROUTES[l]])[0])
-        for t in ex[l]:
+            d = ds.ROUTES[l]
+            vecs.append(cache[d] if cache else enc.embed([d])[0])
+        for t in ex.get(l, []):
             vecs.append(cache[t] if cache else enc.embed([t])[0])
         if not vecs:
             raise ValueError("a class needs at least a description or one example")
@@ -63,7 +68,7 @@ def build(enc, k=0, mode="centroid", use_description=True, seed=0, cache=None):
     return Anchors(labels, mats, mode)
 
 
-def texts_needed(k_max, seed=0):
+def texts_needed(k_max, seed=0, ds=evalset):
     """Every string build() could need, so callers can embed once."""
-    ex = _train_examples(k_max, seed)
-    return list(ROUTES.values()) + [t for v in ex.values() for t in v]
+    ex = _train_examples(k_max, seed, ds)
+    return list(ds.ROUTES.values()) + [t for v in ex.values() for t in v]

@@ -17,7 +17,7 @@ import numpy as np
 
 import anchors as A
 import evalset
-from evalset import OOS, ROUTES
+from evalset import OOS
 from system1 import Encoder, _softmax, load_calibration
 
 
@@ -55,21 +55,26 @@ def main():
     ap.add_argument("--temp", type=float, default=None)
     ap.add_argument("--max-oos", type=int, default=None)
     ap.add_argument("--k", type=int, default=None, help="train examples per class")
+    ap.add_argument("--dataset", default="clinc", choices=["clinc", "massive"],
+                    help="clinc = evalset.py (10 routes + OOS); massive = 60 intents, no OOS")
     ap.add_argument("--encoder", default="encoder",
                     help="basename: <name>.mlpackage + <name>_tok/ (or tok/)")
     ap.add_argument("--calibration", default="calibration.json")
     args = ap.parse_args()
+    import importlib
+    ds = importlib.import_module(
+        {'clinc': 'evalset', 'massive': 'massive'}[args.dataset])
     cal = load_calibration(args.calibration)
     if args.temp is None:
         args.temp = cal["temp"]
     k = cal.get("k", 0) if args.k is None else args.k
     mode, use_desc = cal.get("mode", "centroid"), cal.get("use_description", True)
 
-    rows = evalset.load(args.split, max_oos=args.max_oos)
-    print(f"{args.split}: {evalset.summary(rows)}\n")
+    rows = ds.load(args.split, max_oos=args.max_oos)
+    print(f"{args.dataset} {args.split}: {ds.summary(rows)}\n")
 
     enc = _encoder(args.encoder)
-    an = A.build(enc, k=k, mode=mode, use_description=use_desc)
+    an = A.build(enc, k=k, mode=mode, use_description=use_desc, ds=ds)
     labels = an.labels
     print(f"anchors: k={k} mode={mode} description={use_desc}\n")
     texts = [t for t, _ in rows]
@@ -129,15 +134,23 @@ def main():
           f" min_sim/min_margin, {int((cw & ~gated).sum())} silent"
           f" ({(cw & ~gated).sum() / n_ins:.1%} of in-scope)")
 
-    print("\nout-of-scope detection (AUROC, higher = separates better)")
-    for name, s in (("max cosine (sim)", maxsim), ("margin", margin), ("top prob", top)):
-        print(f"  {name:18s} {auroc(s, ins):.3f}")
+    n_oos = int((~ins).sum())
+    if n_oos:
+        print("\nout-of-scope detection (AUROC, higher = separates better)")
+        for name, s in (("max cosine (sim)", maxsim), ("margin", margin), ("top prob", top)):
+            print(f"  {name:18s} {auroc(s, ins):.3f}")
+    else:
+        print(f"\nout-of-scope detection: not measurable — {args.dataset} ships no "
+              f"out-of-scope rows.\n  Refusal is untested on this dataset; the OOS "
+              f"numbers in README.md are CLINC's.")
 
     # Sweep by in-scope retention, not by absolute threshold: different
     # encoders put their similarities in completely different ranges (MiniLM
     # fits min_sim 0.31, BGE 0.75), so a fixed 0.10-0.40 grid is meaningless
     # across encoders and reported 0% rejected for BGE.
     print("\noperating curve — threshold set to retain a share of in-scope")
+    if not n_oos:
+        print("  (oos-rejected column is vacuous here: no out-of-scope rows)")
     print(f"  {'keep in-scope':>13} {'threshold':>10} {'oos rejected':>13} {'acc on kept':>12}")
     for keep in (1.00, 0.99, 0.98, 0.95, 0.90):
         th = float(np.quantile(maxsim[ins], 1.0 - keep)) if keep < 1.0 else -1.0

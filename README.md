@@ -142,6 +142,28 @@ A 44% reduction in errors for 160 labels and no training — and it mostly
 dissolves the escalation problem, so tier 2 is called for a handful of inputs
 rather than a sixth of traffic.
 
+## A second dataset, for a number that compares
+
+CLINC is the set this project argues with, but nobody else reports on it. The
+same engine on MASSIVE — 60 intents, `mteb/amazon_massive_intent`, which other
+decision models do publish on:
+
+```sh
+.venv/bin/python calibrate.py --dataset massive --k 16 --no-description \
+    --out calibration_massive.json
+.venv/bin/python evaluate.py  --dataset massive --k 16 \
+    --calibration calibration_massive.json
+```
+
+**0.710 accuracy on 2,974 test items, ECE 0.032**, from the same 22.6M-parameter
+encoder with nothing trained. Laya reports 0.783 on MASSIVE intent from 421M
+parameters and an RL stage — 7.3 points ahead at 19× the size, on its own
+harness and split rather than head-to-head.
+
+MASSIVE ships no out-of-scope class, so refusal cannot be measured there at all;
+`calibrate.py` warns and records `oos_validated: false` rather than writing a
+threshold that looks fitted. The 0.994 above is CLINC's.
+
 `where.py` confirms the ANE claim by asking Core ML's own compute planner
 rather than inferring from timing: 157 of 166 ops (94.6%) on the
 `MLNeuralEngineComputeDevice`. The nine on CPU are fp32↔fp16 casts plus the
