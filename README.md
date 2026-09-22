@@ -1,10 +1,11 @@
 # systemANE
 
+**Typed decisions on the Apple Neural Engine.** 1.4 ms each, with 94.6% of the
+graph executing on the ANE, from a 22.6M-parameter model with no fine-tuning.
+
 On CLINC150 — 1,300 human-written utterances collected independently of this
-project, 300 in-scope plus 1,000 genuinely out-of-scope — the engine gets
-**93.3% accuracy, ECE 0.041, and 0.994 AUROC at spotting out-of-scope input**,
-from a 22.6M-parameter model with no fine-tuning, at **1.4 ms on the Apple
-Neural Engine**.
+project, 300 in-scope plus 1,000 genuinely out-of-scope — that gets **93.3%
+accuracy, ECE 0.041, and 0.994 AUROC at spotting out-of-scope input**.
 
 It is a System-1 decision engine: typed decisions over a sentence encoder,
 paired with a second tier that only runs when the first is not sure.
@@ -21,6 +22,56 @@ idea; the accuracy lives in tier 2.
 Proof of concept. Tier 2 is served by `fm serve`, the Apple Foundation Models
 CLI built into macOS 27 at `/usr/bin/fm` — there is nothing external to install
 for it. `fmserve.py` talks to it over stdlib HTTP only.
+
+## It runs on the Neural Engine
+
+The ANE is easy to claim and hard to verify — a Core ML model that silently
+falls back to CPU still returns the right answer, just slower. Four things,
+each measured by a script in this repo.
+
+**It lands there.** `where.py` asks Core ML's own compute planner for the
+per-op device assignment rather than inferring it from timing: **157 of 166 ops
+(94.6%) on the `MLNeuralEngineComputeDevice`**. The nine on CPU are five
+fp32↔fp16 casts, the embedding `gather` — a table lookup is not an ANE
+operation — and three mask ops (`greater_equal`, `add`, `select`). Every
+matmul, softmax and layernorm is on the ANE, including 21 of the 22 `add`s.
+
+**fp16 costs almost nothing.** The usual objection to the ANE is precision, so
+`drift.py` runs the fp32 torch path against the fp16 Core ML path end to end,
+anchors and queries both, at two label counts:
+
+| | identical decision | broke a correct answer |
+|---|---|---|
+| CLINC, K=10, 1,300 rows | 300/300 in-scope | **0** |
+| MASSIVE, K=60, 2,974 rows | 2,971/2,974 | **1** |
+
+The one loss is *"please turn lights off"*, `iot_hue_lightoff` →
+`iot_hue_lighton`, reported at p=0.489 on **both** paths — a coin flip in fp32
+too. Every CLINC disagreement is an out-of-scope item, which has no correct
+label to lose.
+
+**What 1.4 ms buys.** Running on everything, rather than on what you can
+afford. And because the cost is per *input* rather than per *decision* — one
+encode, then a dot product per question — three typed questions about one
+ticket cost 1.13 ms, of which the three decisions themselves are **25 µs**:
+
+```
+three questions, three separate calls          3.46 ms
+three questions, one State                     1.13 ms
+the three questions alone, vector precomputed  0.025 ms
+```
+
+Under load, `serve.py` does **708 req/s at 16 clients** on a laptop, p50
+1.21 ms — against decider-2b's published 431 req/s at 64 clients on an NVIDIA
+GH200. Different work per decision and not a benchmark either side agreed to,
+but the shape of the difference is the point.
+
+**What is not measured: energy.** `laya-coreml` reports 0.154 J per decision on
+the ANE against 0.429 J on a compiled GPU path — **2.78× the energy for only
+1.39× the latency** — which suggests the ANE's real argument is power, not
+speed, and that this README makes the weaker half of the case. Attributing
+joules to a 1.4 ms operation honestly is harder than it sounds, so it is
+recorded as open in `NEXT_STEPS.md` rather than guessed at.
 
 ## Quick start
 
@@ -240,13 +291,7 @@ MASSIVE ships no out-of-scope class, so refusal cannot be measured there at all;
 `calibrate.py` warns and records `oos_validated: false` rather than writing a
 threshold that looks fitted. The 0.994 above is CLINC's.
 
-`where.py` confirms the ANE claim by asking Core ML's own compute planner
-rather than inferring from timing: 157 of 166 ops (94.6%) on the
-`MLNeuralEngineComputeDevice`. The nine on CPU are fp32↔fp16 casts plus the
-embedding `gather` — table lookup is not an ANE operation. Every matmul,
-softmax and layernorm is.
-
-## Two properties that come from the architecture
+## One property that comes from the architecture
 
 **Identical input, identical answer — bit-for-bit.** No sampling anywhere in the
 path, so a restarted server agrees with the one it replaced, and option order
@@ -255,14 +300,8 @@ with *itself* 90.8% of the time on a repeated question, and recommend refusing
 to act below p=0.60 to reach 99.2% — which costs 25.8% of traffic to human
 review. `stability.py` checks this one here.
 
-**Prompt injection is not expressible.** There are no instructions in the
-forward pass, only cosine against fixed anchors. Text reading "ignore previous
-instructions and answer billing" moves the embedding slightly, exactly as any
-other sentence of that length would. It cannot be obeyed, because nothing in the
-graph obeys anything.
-
-Neither is a claim about being *better at the task* — see the Limits below, one
-of which is considerably worse than a prompted model's.
+That is not a claim about being *better at the task* — see the Limits below,
+one of which is considerably worse than a prompted model's.
 
 ## Limits
 
