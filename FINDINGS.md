@@ -125,6 +125,71 @@ convincingly for moving away from a correct initial guess.** That is the cost of
 tuning against a test set written by the same person who wrote the thing being
 tested.
 
+## Confident errors, and why no threshold catches them
+
+ECE averages the whole reliability diagram. It is silent about the tail that
+actually costs something: an answer that is wrong *and* sure. `evaluate.py` now
+reports it directly, in-scope, on the 16-example test configuration:
+
+| p(top) ≥ | items | wrong | error among them | share of in-scope |
+|---|---|---|---|---|
+| 0.90 | 265 | 7 | 0.026 | **2.3%** |
+| 0.95 | 253 | 4 | 0.016 | 1.3% |
+| 0.99 | 231 | 1 | 0.004 | 0.3% |
+
+Seven items out of 300 — so **roughly a third of all 20 errors are confident
+ones**. And of those seven, `min_sim` and `min_margin` flag **zero**:
+
+```
+min_sim = 0.4286                      min_margin = 0.05
+
+   p   marg   sim   predicted      truth              text
+0.99   0.99  0.65   credit_limit   transactions       is my visa bill over my limit this month
+0.99   0.98  0.61   report_fraud   report_lost_card   my bank of america visa platinum was swiped from my belongings
+0.98   0.97  0.49   credit_limit   pay_bill           pay $175 on my visa
+0.97   0.94  0.68   report_fraud   report_lost_card   someone used my chase card without my authorization
+0.95   0.92  0.58   credit_limit   transactions       what were my last 10 charges on my credit card
+0.94   0.89  0.60   balance        transactions       how much have i spent on my debit card this month
+0.91   0.82  0.66   bill_due       pay_bill           today my electric bill will be paid, or should be
+```
+
+Every one clears both gates by a wide margin. That is not a threshold that needs
+tuning — **the signals are working correctly and the answer is still wrong.**
+
+The reason is visible in the label pairs. All seven are *adjacent intents*:
+`transactions` against `credit_limit` and `balance`, `pay_bill` against
+`bill_due`, `report_lost_card` against `report_fraud`. These inputs sit
+genuinely between two labels — *"someone used my chase card without my
+authorization"* is a defensible `report_fraud` — so the embedding is close to
+the wrong anchor **because it should be**. Confidence measures distance to an
+anchor, and the distance is small. There is nothing left for a threshold to see.
+
+This is the same mechanism as the masking result below, arriving from a third
+direction: a schema whose classes are semantically adjacent has failures that no
+post-hoc signal computed from that schema can detect.
+
+**Calibration made this worse, not better, and that is correct.** Sweeping the
+temperature:
+
+| temperature | reach p ≥ 0.90 | wrong | share of in-scope |
+|---|---|---|---|
+| 0.1000 | 69/300 | 0 | 0.0% |
+| 0.0300 | 258/300 | 6 | 2.0% |
+| **0.0260** (fitted) | **265/300** | **7** | **2.3%** |
+| 0.0200 | 281/300 | 14 | 4.7% |
+
+The zero at T=0.10 is not safety. Only 69 of 300 items reach 0.90 at all — the
+engine scores no confident errors by being too underconfident to be confident
+about anything, which is exactly the state *Calibration, and how a toy test set
+got it backwards* describes and exactly what fitting moved away from. **Trading
+ECE 0.196 for ECE 0.041 bought seven confident errors, and was still the right
+trade.** The metric to watch is not one or the other.
+
+For external reference, kev reports the same metric — wrong answers at p ≥ 0.9 —
+at 4.0% after fitting, against 8.7% before, on its own data. Our 2.3% is on a
+different dataset with a different harness and is not a head-to-head. See
+`RELATED_WORK.md`.
+
 ## The escalation curve
 
 This is what a cascade is for, and the reason accuracy alone is the wrong

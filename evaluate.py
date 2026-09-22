@@ -4,6 +4,8 @@
 Reports what a cascade actually cares about:
   * in-scope accuracy            -- is the answer right when it answers?
   * ECE                          -- does its confidence mean anything?
+  * confident errors             -- and does it mean anything in the tail,
+                                    where a wrong answer is also a sure one?
   * OOS AUROC                    -- can it tell "not in this schema" at all,
                                     and which signal does it best with?
   * risk/coverage                -- error rate among the inputs it keeps,
@@ -84,10 +86,48 @@ def main():
 
     ins = truth != OOS
     correct = (pred == truth) & ins
+    n_ins = int(ins.sum())
 
     print(f"in-scope accuracy      {correct[ins].mean():.3f}  ({correct[ins].sum()}/{ins.sum()})")
     print(f"ECE (in-scope, T={args.temp})  {ece(top[ins], correct[ins].astype(float)):.3f}")
     print(f"mean confidence        {top[ins].mean():.3f}  vs accuracy {correct[ins].mean():.3f}")
+
+    # ECE averages the whole reliability diagram, so it is silent about the
+    # tail that actually costs something: a wrong answer the engine is sure
+    # about. Nothing downstream can catch one -- that is the definition -- so
+    # the rate is a hard floor on what a confidence gate can do.
+    print("\nconfident errors -- in-scope, wrong, and sure about it")
+    print(f"  {'p(top) >=':>9} {'items':>6} {'wrong':>6} {'err|conf':>9}"
+          f" {'share of in-scope':>18}")
+    for th in (0.90, 0.95, 0.99):
+        m = ins & (top >= th)
+        w = int((m & ~correct).sum())
+        rate = w / m.sum() if m.sum() else float("nan")
+        print(f"  {th:9.2f} {int(m.sum()):6d} {w:6d} {rate:9.3f}"
+              f" {w / n_ins:17.1%}")
+
+    # The rate is a property of the temperature, not of the encoder, and
+    # fitting moved temp *down* -- which sharpens. Calibration improved ECE
+    # and should be expected to make this tail worse, not better.
+    print("  by temperature, at p >= 0.90:")
+    for t in sorted({0.10, round(args.temp, 4), 0.03, 0.02}, reverse=True):
+        pt = np.stack([_softmax(s, t) for s in sims]).max(1)
+        conf = ins & (pt >= 0.90)
+        w = int((conf & ~correct).sum())
+        mark = "  <- fitted" if abs(t - args.temp) < 1e-4 else ""
+        # The item count matters: a temperature that never reaches 0.90 scores
+        # zero confident errors by being uselessly underconfident, not by being
+        # safe. T=0.10 is that case, and it is the one fitting moved away from.
+        print(f"    T={t:<7.4f} {int(conf.sum()):3d}/{n_ins} reach 0.90,"
+              f" {w:3d} wrong ({w / n_ins:5.1%} of in-scope){mark}")
+
+    # A confident error that min_sim or min_margin flags is not silent: the
+    # cascade still escalates or refuses it. The residue is the real number.
+    cw = ins & ~correct & (top >= 0.90)
+    gated = cw & ((maxsim < cal["min_sim"]) | (margin < cal["min_margin"]))
+    print(f"  of the {int(cw.sum())} at p >= 0.90: {int(gated.sum())} flagged by"
+          f" min_sim/min_margin, {int((cw & ~gated).sum())} silent"
+          f" ({(cw & ~gated).sum() / n_ins:.1%} of in-scope)")
 
     print("\nout-of-scope detection (AUROC, higher = separates better)")
     for name, s in (("max cosine (sim)", maxsim), ("margin", margin), ("top prob", top)):
@@ -123,7 +163,6 @@ def main():
                    or pp.max() < 0.55)
         hidden_flag += flagged
         hidden_conf.append(pp.max())
-    n_ins = int(ins.sum())
     print(f"\nrobustness: true label masked out of the legal set ({n_ins} items)")
     print(f"  flagged rather than silently mislabelled: {hidden_flag}/{n_ins} "
           f"({hidden_flag/n_ins:.1%})")

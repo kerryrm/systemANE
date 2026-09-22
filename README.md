@@ -156,12 +156,17 @@ support tickets its `min_sim` of 0.3085 refuses genuinely in-scope tickets at
 0.27–0.28. Every schema needs its own fit. `Choice()` takes `calibration=` for
 exactly this reason.
 
-**Margin goes blind at a sharp temperature.** The fitted temperatures are low
-(0.026 on CLINC, 0.036 on tickets), which saturates the softmax and compresses
-margin's dynamic range. In the demo above, *"something is wrong"* and *"I need
-help with my account"* are both genuinely ambiguous and both answered anyway,
-at margins of 0.94 and 0.97. A confident wrong answer is invisible to a
-confidence threshold.
+**A confident wrong answer is invisible to a confidence threshold.** On the
+CLINC test set, 7 of 300 in-scope items (2.3%) are answered wrongly at p ≥ 0.90
+— about a third of all errors — and `min_sim` and `min_margin` flag **none** of
+them. That is not a threshold needing tuning. All seven are adjacent-intent
+confusions (`transactions` vs. `credit_limit`, `report_lost_card` vs.
+`report_fraud`), so the embedding sits close to the wrong anchor because it
+genuinely should, and every signal the engine computes says the answer is fine.
+
+This is the floor on what a cascade can do: escalation fixes uncertainty, and
+these decisions are not uncertain. `FINDINGS.md` has the seven and the
+temperature sweep behind them.
 
 ## Layout
 

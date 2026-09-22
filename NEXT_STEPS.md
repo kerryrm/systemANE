@@ -9,24 +9,20 @@ Nothing here is committed work. `FINDINGS.md` is the measured record;
 
 ---
 
-## 1. Confident-error rate in `evaluate.py`
+## ~~1. Confident-error rate in `evaluate.py`~~ — done
 
-**Do this first.** `FINDINGS.md` documents a failure the current metrics cannot
-see: *"a confident wrong answer is invisible to a confidence threshold."* Our
-fitted temperatures (0.026 on CLINC, 0.036 on tickets) saturate the softmax,
-which makes that tail likely, and ECE 0.041 averages it away.
+`evaluate.py` now reports it. **2.3% of in-scope test items (7/300) are wrong at
+p ≥ 0.90, about a third of all errors, and `min_sim`/`min_margin` flag zero of
+them.** The result was sharper than expected in a way that closes the question
+rather than opening it: all seven are adjacent-intent confusions, so the gates
+are not mis-tuned — there is no signal for them to fire on. See *Confident
+errors, and why no threshold catches them* in `FINDINGS.md`.
 
-Report the rate of **wrong answers at p ≥ 0.9**, before and after calibration,
-in-scope only. kev publishes 8.7% → 4.0% for the same metric, so there is at
-least one external number to sit next to.
-
-* **Effort:** an afternoon. Pure post-processing on scores `evaluate.py` already
-  computes.
-* **Negative result:** the rate is already near zero, and the saturation concern
-  in `FINDINGS.md` is theoretical. That would be worth knowing and worth writing
-  down.
-* **Watch for:** this is a tail metric on 300 in-scope test items. At a true rate
-  of 4% that is 12 items. Report the count, not just the percentage.
+Two things fell out of it worth carrying forward. Calibration made this tail
+*worse* (0 → 7 confident errors) while improving ECE from 0.196 to 0.041, and
+that was still the right trade — so neither metric should be read alone. And it
+puts a floor on the cascade: escalation fixes uncertainty, and these decisions
+are not uncertain.
 
 ## 2. Chance-corrected confidence and normalized entropy
 
