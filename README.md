@@ -80,6 +80,42 @@ speed, and that this README makes the weaker half of the case. Attributing
 joules to a 1.4 ms operation honestly is harder than it sounds, so it is
 recorded as open in `NEXT_STEPS.md` rather than guessed at.
 
+## Watching it work
+
+[**▶ demos/bluesky/ANE-jetstreaming.mp4**](demos/bluesky/ANE-jetstreaming.mp4)
+— 24 seconds of every link posted to Bluesky being sorted as it arrives.
+
+```
+  systemANE · the Bluesky firehose, sorted on the Neural Engine
+  ─────────────────────────────────────────────────────────────────────
+  00:22   posts 1078  48.9/s   cards 178  8.1/s   shown 78  refused 100  56%
+  encode 3.15 ms (warm 1.44)  capacity 695 posts/s warm  using 2.5% of one thread
+  ─────────────────────────────────────────────────────────────────────
+     news 0.53  new  [penncapital-star.com] Trump likes data centers. Congress...
+    music 0.53 rule  [youtube.com        ] All Star - Smash Mouth (SKA PUNK Cover)
+     news 0.34  new  [propublica.org     ] The FBI Anti-Corruption Squad Was Circling...
+```
+
+`rule` means the link's domain is in a lookup table. `new` means the encoder
+placed it from the card's title alone — which is **81.6%** of the stream, since
+a 25-minute capture turned up 2,997 distinct domains and 66% of them appeared
+exactly once. Anchors are built from domains that *do* carry a rule, so the
+labels are free and nobody on this project wrote them.
+
+Tested by splitting on **domain**, never on post — centroids from the Guardian,
+Globo, AP and Spiegel, scored on the NYT, BBC, Reuters and Le Monde:
+**0.821 accuracy, 0.704 macro-F1** over 823 held-out cards from sites never
+seen in training, against a 0.599 majority baseline.
+
+The errors are on screen too, and they are the ones that number predicts — a
+book listing, *"Continental Drift by Mai-Linh Hong"*, goes to `music`, because
+"title by person" is how a song is credited. Roughly one row in five is wrong.
+
+It is also the case this engine was built for rather than a flattering one: in
+`~/Downloads` a two-line host rule placed 99% of files and the model was
+decoration. A long tail is what gives an encoder a job, and this is one.
+`demos/bluesky/README.md` has the harvest, the rules and what went wrong.
+
 ## Quick start
 
 ```sh
@@ -347,8 +383,6 @@ drift.py              fp16 ANE vs fp32 torch, measured on decisions
 warmup.py             what an idle gap costs, per compute unit
 serve.py              the System One API over HTTP (stdlib only)
 stability.py          determinism, and what irrelevant text costs
-
-demos/bluesky/        every link on Bluesky, sorted live on the ANE
 system1.py            Encoder + Choice / Boolean / Score primitives
 fmserve.py            minimal stdlib client for `fm serve` (tier 2)
 cascade.py            the two-tier demo
@@ -363,8 +397,10 @@ calibrate.py          fit temp / min_sim / min_margin on validation
 evaluate.py           test-set accuracy, ECE, OOS AUROC
 sweep_anchors.py      the k sweep behind the anchors table
 
+demos/bluesky/        every link on Bluesky, sorted live on the ANE
+
 FINDINGS.md           what was measured, and which guesses were wrong
-RELATED_WORK.md       five other decision engines, and what they change here
+RELATED_WORK.md       six other decision engines, and what they change here
 NEXT_STEPS.md         what is worth doing next, and what is deliberately not
 ```
 
