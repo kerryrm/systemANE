@@ -197,6 +197,7 @@ minilm.py             MiniLM-L6 forward pass, written out so the graph is ours
 build.py              convert to encoder.mlpackage (verifies against HuggingFace)
 build_encoder.py      compile any BERT-architecture encoder (--model, --pooling)
 where.py              per-op device assignment from Core ML's compute planner
+drift.py              fp16 ANE vs fp32 torch, measured on decisions
 system1.py            Encoder + Choice / Boolean / Score primitives
 fmserve.py            minimal stdlib client for `fm serve` (tier 2)
 cascade.py            the two-tier demo
@@ -205,6 +206,7 @@ tickets.py            demo schema: 5 routes, fixtures, and a validation set
 calibrate_tickets.py  fit the demo schema's thresholds
 
 evalset.py            CLINC150 loading and splits
+massive.py            MASSIVE loading (60 intents, no out-of-scope class)
 anchors.py            class representations: descriptions vs example centroids
 calibrate.py          fit temp / min_sim / min_margin on validation
 evaluate.py           test-set accuracy, ECE, OOS AUROC

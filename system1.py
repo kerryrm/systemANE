@@ -70,7 +70,14 @@ class Encoder:
                 "attn_bias": ((1 - am)[:, None, None, :] * -1e4).astype(np.float32),
                 "pool_mask": am[:, :, None].astype(np.float32)})
             out.append(np.array(r["embedding"]).ravel())
-        return np.stack(out)
+        E = np.stack(out)
+        # Normalise here rather than trusting the graph's final rsqrt. On
+        # compute_units="CPU_ONLY" Core ML returns the *unnormalised* pooled
+        # vector (norm ~19.6 instead of 1.0); CPU_AND_NE, CPU_AND_GPU and ALL
+        # all normalise correctly. Everything downstream treats these as unit
+        # vectors -- cosine, min_sim thresholds, anchor centroids -- so the
+        # failure is silent and total. Cheap to make impossible.
+        return E / np.clip(np.linalg.norm(E, axis=1, keepdims=True), 1e-12, None)
 
 
 def _softmax(sims, temp):

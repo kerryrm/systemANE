@@ -473,22 +473,72 @@ carry evidential weight.
 
 # Build notes
 
-## fp16 costs nothing here
+## fp16 costs one decision in three thousand
 
 Apple ships face *recognition* in a non-ANE build while face detection, quality
 and pose run on the ANE, which suggested fp16 might hurt threshold decisions on
-embeddings. For this workload it does not:
+embeddings. The first answer here was ten hand-written strings at K=5 — the same
+fixtures-for-data mistake as the temperature sweep. `drift.py` runs the whole
+evaluation set instead, anchors and queries both embedded by each path so anchor
+drift is included, and at two label counts because the standing caveat was that
+precision should matter more as K grows:
+
+| fp16 ANE vs. fp32 torch | CLINC, K=10, 1,300 rows | MASSIVE, K=60, 2,974 rows |
+|---|---|---|
+| embedding cosine, mean | 0.9999816 | 0.9999774 |
+| embedding cosine, min | 0.9999534 | 0.9998997 |
+| identical decision | 1,295/1,300 (99.62%) | **2,971/2,974 (99.90%)** |
+| — in-scope | **300/300 (100%)** | 2,971/2,974 |
+| — out-of-scope | 995/1,000 (99.50%) | (none) |
+| mean \|Δp(top)\| | 0.00178 | 0.00106 |
+| max \|Δp(top)\| | 0.01219 | 0.01389 |
+| flips that broke a correct answer | **0** | **1** |
+
+**On CLINC every in-scope decision is identical.** All five disagreements are
+out-of-scope items, which have no correct label to lose and are refused on `sim`
+— a magnitude, which barely moves — rather than on the argmax.
+
+At K=60 fp16 costs exactly one correct answer out of 2,974, and it is this one:
 
 ```
-cosine(fp16 ANE, fp32 torch):  mean 0.99992, min 0.99942
-same top-1 route:              10/10
-max |delta p(top)|:            0.0033
+0.489 -> 0.489   iot_hue_lightoff -> iot_hue_lighton   "please turn lights off"
 ```
 
-That bounds the concern rather than dismissing it, and on a small sample —
-routing across 5 well-separated categories has huge margins, while recognition
-discriminates thousands of identities on tiny ones. Expect precision to matter as
-the label count grows.
+The two anchors are near-equidistant and the engine was reporting p=0.489 on
+both paths — it was already saying it could not tell. **The caveat was right
+about the direction and wrong about the size:** going from 10 labels to 60 does
+move drift from zero to non-zero, and the magnitude is 0.03%, on a decision that
+was a coin flip in fp32 as well.
+
+## The CPU-only path silently drops the normalisation
+
+Found while building `drift.py`, not while looking for it. `Encoder` takes a
+`compute_units` argument, and on one setting it returns garbage:
+
+| compute_units | ‖embedding‖ |
+|---|---|
+| CPU_AND_NE (default) | 1.000 |
+| CPU_AND_GPU | 1.000 |
+| ALL | 1.000 |
+| **CPU_ONLY** | **19.596** |
+
+The last op in `minilm.py` is `pooled * rsqrt(Σpooled² + 1e-12)`. On the CPU-only
+backend Core ML does not apply it, and the raw pooled vector comes back instead.
+Renormalising by hand recovers agreement with the ANE path to cosine 0.99997, so
+the encoder is fine — it is the final op alone.
+
+Everything downstream assumes unit vectors: cosine scoring, `min_sim`
+thresholds, anchor centroids. With norms near 19.6 the "similarities" run to
+17.5, every `min_sim` comparison passes, and the softmax saturates — **the
+failure is silent, total, and looks like confident success.** It would have been
+invisible in any accuracy-only test, because the argmax of a dot product is
+mostly preserved; only the calibrated parts break.
+
+No published number is affected. Every script uses `CPU_AND_NE`, and `where.py`
+loads `CPU_ONLY` only to read the compute plan, never to run inference. But the
+parameter is public API, so `Encoder.embed()` now normalises in Python rather
+than trusting the graph. That is one line and it makes the class's contract true
+by construction instead of by backend.
 
 ## Conversion
 

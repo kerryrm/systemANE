@@ -70,24 +70,26 @@ It also revised two earlier findings, both against the intuition:
 The prediction going in — that 60 classes would crowd more than 10 and produce
 more undetectable errors — was wrong in both directions.
 
-## 4. Decision drift over the whole eval set, not ten fixtures
+## ~~4. Decision drift over the whole eval set, not ten fixtures~~ — done
 
-`build.py` verifies *embedding* cosine to 0.99999994 — good. The fp16 finding,
-though, spot-checks ten hand-written fixtures for `max |Δp| ≤ 0.0033`.
+`drift.py` runs the fp32 torch path against the fp16 Core ML path end to end —
+anchors and queries both, so anchor drift is included — at K=10 and K=60.
 
-`laya-coreml` checks 189/189 decisions against upstream and reports max
-probability drift of 0.002925. That is the right shape: the quantity you care
-about is drift in the **decision**, measured over real data.
+**CLINC: every in-scope decision identical (300/300).** All five disagreements
+are out-of-scope items, which have no correct label to lose. **MASSIVE at K=60:
+2,971/2,974 identical, and fp16 costs exactly one correct answer** — "please
+turn lights off", `iot_hue_lightoff` → `iot_hue_lighton`, at p=0.489 on both
+paths, so it was a coin flip in fp32 too. The caveat was right about the
+direction and wrong about the size: 0.03%.
 
-Run the CLINC test set through both the fp32 torch path and the fp16 ANE path,
-and report top-1 agreement plus max and mean `|Δp|` over all 1,300 items.
-
-* **Effort:** half a day. `evaluate.py` already runs both paths.
-* **Why it matters beyond tidiness:** `FINDINGS.md` says *"expect precision to
-  matter as the label count grows"* and then tests at K=5. CLINC is K=160. This
-  is the test that sentence was asking for.
-* **Negative result:** perfect agreement, and the fp16 caveat can be stated as
-  settled rather than bounded.
+It also turned up a real bug that had nothing to do with drift.
+**`Encoder(compute_units="CPU_ONLY")` returned unnormalised embeddings** — norm
+19.6 instead of 1.0 — because Core ML's CPU-only backend does not apply the
+graph's final `rsqrt`. `CPU_AND_NE`, `CPU_AND_GPU` and `ALL` are all correct, and
+no published number used the broken path, but everything downstream assumes unit
+vectors, so the failure was silent and total. `Encoder.embed()` now normalises in
+Python. See *The CPU-only path silently drops the normalisation* in
+`FINDINGS.md`.
 
 ## 5. A multi-question API
 
