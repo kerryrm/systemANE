@@ -109,6 +109,19 @@ AUROC 0.994 against 0.945 for margin. Keeping them apart is also what lets the
 engine *refuse* rather than escalate, which is the right action when no label
 is correct.
 
+**This is where the embedding approach earns its keep.** Most decision models
+score options through the language-model head — at option letters, at a
+`[MASK]` per option, at a single-token label. That is better at picking *which*
+one. But it softmaxes over the option set, and a softmax has no way to say
+*none of these*: whatever the model thought of the input in absolute terms is
+normalised away before anything downstream sees it. Answering the second
+question then needs a separately trained head.
+
+Here it falls out of the geometry. `sim` is the raw cosine, before any
+normalisation — a scalar that is simply low when nothing in the schema
+resembles the input, at no cost and with nothing trained. Of the five engines
+in `RELATED_WORK.md`, none publishes an out-of-scope number.
+
 ## Reproducing the headline
 
 ```sh
@@ -169,6 +182,10 @@ anchors.py            class representations: descriptions vs example centroids
 calibrate.py          fit temp / min_sim / min_margin on validation
 evaluate.py           test-set accuracy, ECE, OOS AUROC
 sweep_anchors.py      the k sweep behind the anchors table
+
+FINDINGS.md           what was measured, and which guesses were wrong
+RELATED_WORK.md       five other decision engines, and what they change here
+NEXT_STEPS.md         what is worth doing next, and what is deliberately not
 ```
 
 Model packages and tokenizers are build artifacts and gitignored; run

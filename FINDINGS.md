@@ -1,0 +1,355 @@
+# Findings
+
+The measured record behind `system1`: what was tested, what it cost, and which
+guesses turned out to be wrong. `README.md` is the usable document; this is the
+working-out, kept because several of these results argue against the obvious
+choice.
+
+Every number here was produced by the scripts in this repo, on CLINC150 unless
+stated otherwise. Where a finding has been superseded, the later result is the
+one stated. Forward-looking decisions live in `NEXT_STEPS.md`; how this engine
+compares to other decision models is in `RELATED_WORK.md`.
+
+---
+
+# What the engine is made of
+
+## Class representations: examples beat descriptions
+
+The baseline embeds one handwritten description per class. `anchors.py` can
+instead embed *k* real utterances from the train split and use their centroid —
+SetFit's data without SetFit's training, which is worth measuring before
+reaching for a trainer. Selection ran on validation only:
+
+| representation | val accuracy | OOS AUROC |
+|---|---|---|
+| description only | 0.845 | 0.995 |
+| desc + 4 examples | 0.945 | 0.999 |
+| 8 examples (centroid) | 0.940 | 0.999 |
+| **16 examples (centroid)** | **0.965** | **0.999** |
+| 16 examples (max-sim) | 0.895 | 0.998 |
+| 32 examples (centroid) | 0.955 | 0.999 |
+
+Centroids beat max-similarity everywhere, and the handwritten description stops
+helping once there are ~8 real examples — at k=16 it is actively slightly
+worse. **A sentence describing a class is a worse anchor than a handful of
+things people actually said.**
+
+On test, against the zero-shot baseline, each with its own fitted calibration:
+
+| | description only | 16 examples |
+|---|---|---|
+| in-scope accuracy | 0.880 | **0.933** |
+| errors | 36/300 | **20/300** |
+| ECE | 0.043 | 0.041 |
+| OOS AUROC (max cosine) | 0.989 | **0.994** |
+| OOS rejected / in-scope kept | 93.6% / 98.3% | **97.5% / 96.7%** |
+| escalation needed for ≤5% error | 17.5% | **1.5%** |
+
+A 44% reduction in errors for 160 labels and no training. It also mostly
+dissolves the escalation problem: validation error at *zero* escalation fell
+from 15.0% to 3.5%, so tier 2 is called for a handful of inputs rather than a
+sixth of traffic.
+
+Three caveats that matter:
+
+* **Validation said 0.965, test delivered 0.933.** That 3-point gap is the cost
+  of choosing k on validation — real, expected, and the reason the choice was
+  not made on test.
+* **k=8, 16 and 32 are statistically indistinguishable.** With 200 in-scope
+  validation items the standard error near 0.95 is about 0.015. 16 is the
+  argmax of a noisy sweep, not a demonstrated optimum.
+* **It is no longer zero-shot.** The baseline needed one sentence per class;
+  this needs 16 labelled examples per class. `cascade.py`'s support-ticket
+  schema has none, so it still runs on descriptions — see *Where descriptions
+  run out*, below.
+
+## Which encoder
+
+`build_encoder.py` compiles any BERT-architecture sentence encoder, so this is
+a flag rather than a rewrite. Each row has its own fitted calibration:
+
+| encoder | params | ms/query | accuracy | ECE | OOS AUROC | errors |
+|---|---|---|---|---|---|---|
+| MiniLM-L6 | 22.6M | 1.18 | 0.933 | 0.041 | 0.994 | 20/300 |
+| **BGE-small** | 33.2M | 1.75 | **0.953** | 0.034 | 0.995 | 14/300 |
+| BGE-base | 108.9M | 4.07 | 0.957 | 0.026 | 0.997 | 13/300 |
+
+Returns fall off a cliff. Going 22.6M → 33.2M costs 0.57 ms and buys **+2.0
+points**; going 33.2M → 108.9M costs 3.3× the parameters and buys **+0.4**.
+BGE-small is the knee.
+
+**But BGE is not a drop-in for an uncalibrated schema.** On the support-ticket
+fixtures its similarities overlap:
+
+```
+                 MiniLM          BGE-small
+clear         0.319 - 0.594    0.616 - 0.794
+out-of-scope  0.070 - 0.169    0.488 - 0.662   <- overlaps clear
+```
+
+MiniLM separates cleanly; BGE compresses everything into a narrow high-cosine
+band, which **ranks better and thresholds worse**. No single `min_sim` works
+there. So `cascade.py` stays on MiniLM, and BGE is opt-in via `--encoder bge`
+on the paths that have fitted thresholds. Better on the benchmark, not
+automatically better in place — the same lesson as calibration not transferring
+between schemas, arriving from a different direction.
+
+---
+
+# Making confidence mean something
+
+## Calibration, and how a toy test set got it backwards
+
+The knobs are fitted on validation by NLL and written to `calibration.json`;
+`Choice()` reads it. Fitting changed nothing about accuracy — temperature
+cannot move an argmax — and everything about whether `prob` means anything:
+
+| | fixture-tuned | fitted on validation |
+|---|---|---|
+| temperature | 0.10 | **0.0469** |
+| `min_sim` | 0.25 | **0.3085** |
+| `min_margin` | 0.30 | **0.40** |
+| test ECE | 0.237 | **0.043** |
+| mean confidence vs accuracy | 0.649 vs 0.880 | 0.860 vs 0.880 |
+
+An earlier version of the README contained a temperature sweep over sixteen
+hand-written inputs, concluding that 0.05 was "far too sharp and never
+escalates" and that 0.10 separated cleanly. On real data 0.05 is almost exactly
+right (ECE 0.033) and 0.10 is badly wrong (ECE 0.196) — the engine was left
+*under*confident, 23 points below its own accuracy, which is the opposite of
+the overconfidence the fixtures appeared to show.
+
+So the sweep did not merely produce an imprecise number. **It argued
+convincingly for moving away from a correct initial guess.** That is the cost of
+tuning against a test set written by the same person who wrote the thing being
+tested.
+
+## The escalation curve
+
+This is what a cascade is for, and the reason accuracy alone is the wrong
+headline. Sweeping `min_margin` over in-scope validation items:
+
+| margin | escalated | error among kept |
+|---|---|---|
+| 0.00 | 0.0% | 0.150 |
+| 0.20 | 11.0% | 0.084 |
+| **0.40** (fitted) | **17.5%** | **0.048** |
+| 0.60 | 21.5% | 0.038 |
+| 0.90 | 45.5% | 0.000 |
+
+**Handing 17.5% of traffic to tier 2 cuts the error rate from 15.0% to 4.8%.**
+The remaining errors are reachable too, at 45.5% escalation — the curve does go
+to zero, which is the useful property. Pick the point your latency and cost
+budget allows; `--target-error` sets it.
+
+Two things to remember about this table. `min_margin` is computed after the
+softmax, so it only means anything at the temperature it was fitted at — refit
+it whenever `temp` changes. And this is the **description-only** configuration,
+which is why it starts at 15.0% error; with 16-example centroids the same curve
+starts at 3.5% and needs only 1.5% escalation to hit the 5% target. The shape is
+the point; the absolute numbers moved once the anchors did.
+
+## The operating curve
+
+`min_sim` is fitted to retain 99% of in-scope traffic, since losing real traffic
+is the expensive error and rejecting out-of-scope is the cheap win. On test:
+
+| threshold | OOS rejected | in-scope kept | accuracy on kept |
+|---|---|---|---|
+| 0.20 | 80.9% | 99.3% | 0.886 |
+| 0.25 | 90.2% | 99.0% | 0.889 |
+| **0.3085** (fitted) | **93.6%** | **98.3%** | **0.892** |
+| 0.35 | 96.3% | 93.3% | 0.914 |
+| 0.40 | 98.2% | 87.0% | 0.927 |
+
+Validation predicted 95.0% / 99%; test delivered 93.6% / 98.3%, so the threshold
+generalises.
+
+---
+
+# What it cannot do
+
+## Two kinds of not-knowing
+
+The engine can fail to know in two unrelated ways, and only one of them survives
+a softmax:
+
+| | signal | question it answers |
+|---|---|---|
+| ambiguous between labels | `margin` (post-softmax) | *which* of these? |
+| outside the schema | `sim` (raw max cosine) | *any* of these? |
+
+Raw cosine separates them cleanly:
+
+```
+clear          0.319 - 0.594
+ambiguous      0.217 - 0.441
+out-of-scope   0.070 - 0.169
+```
+
+The softmax normalises magnitude away, so margin alone cannot see the second
+case: *"I'd like to speak to a manager"* scores a higher margin (0.34) than the
+genuinely ambiguous *"it broke"* (0.16).
+
+**On fixtures, `min_sim` appeared to add nothing** — margin and probability
+already escalated 4/4 out-of-scope inputs there. On CLINC150 it is decisively
+the best signal available (AUROC 0.989 against 0.894 for margin). Sixteen inputs
+could not show it.
+
+What `sim` *also* supplies is the **reason**, which determines the right action —
+and here the action matters more than the detection, because tier 2 is bound to
+the same enum and is therefore also forced to pick a wrong label:
+
+```
+what are your office hours   -> tier 2 says: feature
+happy holidays everyone      -> tier 2 says: feature
+```
+
+So `cascade.py` short-circuits `out-of-scope` to "no category" instead of
+escalating. Cheaper *and* more correct than asking a 950× more expensive model
+the same impossible question.
+
+## Masking is a correctness assumption, not a safety net
+
+`route(text, allowed=[...])` decides among a subset, applying the mask before
+the softmax so probabilities renormalise over the legal set. `Choice(...,
+always_escalate={"feature"})` sends a label to tier 2 regardless of confidence,
+with `reason="structural"` — some decisions need a *bigger* model rather than a
+*more certain* one, and a confidence threshold cannot express that.
+
+The masking result is the uncomfortable one. Removing each test item's true
+label from the legal set, the engine flags only **30.7%** of the resulting
+forced-wrong decisions, at a mean confidence of 0.843. The other 69% are
+confidently mislabelled into whatever neighbour remains — these ten banking
+intents are semantically adjacent, so `balance` masked out still leaves things
+that look like it.
+
+**If your mask is wrong, the engine will comply without complaint.** A mask
+derived from structure (a checkbox cannot accept typed text) is safe; a
+heuristic mask is exposed.
+
+## `Score` is weak, but its uncertainty is not
+
+Embedding similarity captures topic, not intensity. On a 0–3 anger rubric at the
+default temperature:
+
+| truth | scored | confidence | message |
+|---|---|---|---|
+| 0 | 1.45 | **0.31** | "thanks for the help!" |
+| 1 | 1.25 | 0.64 | "this is mildly annoying" |
+| 2 | 1.74 | 0.72 | "I've been waiting three weeks and nobody has replied" |
+| 3 | 1.68 | **0.32** | "ABSOLUTELY UNACCEPTABLE, I am done with this company" |
+
+Everything collapses into 1.25–1.74: there is essentially no dynamic range, and
+the two extremes are the two it gets most wrong. But `confidence` is 0.31 and
+0.32 on exactly those, against 0.64–0.72 on the two it gets closest. **The
+uncertainty signal survives where the estimate does not** — so treat `Score` as
+a detector of "this needs a real model", not as a measurement.
+
+## Where descriptions run out
+
+`calibration.json` belongs to the CLINC banking routes and does not transfer:
+its `min_sim` of 0.3085 refuses genuinely in-scope support tickets at 0.27–0.28.
+`calibrate_tickets.py` therefore fits the ticket schema on its own data —
+`tickets.VALIDATION`, 72 tickets disjoint from the fixtures `cascade.py` prints,
+so the demo stays a held-out test rather than a restatement of the fit.
+
+Temperature and `min_margin` fit cleanly. `min_sim` does not, and the reason is
+the anchors:
+
+```
+in-scope  max-cosine range   0.051 - 0.572
+oos       max-cosine range   0.061 - 0.279   <- contained inside in-scope
+```
+
+A concrete bug report sits *below* chatty out-of-scope text:
+
+```
+0.051  [bug]  dates display as 1970 on the dashboard
+0.068  [bug]  the export button produces an empty csv every time
+...
+0.279  [oos]  I have attached the document you asked for
+0.227  [oos]  unsubscribe
+```
+
+`bug` is anchored on the description *"the software crashes, errors, freezes or
+behaves incorrectly"*. **A real bug report describes a symptom, and shares almost
+no vocabulary with the abstract category.** This is *Class representations*
+arriving from the failure side: on CLINC, 16 example centroids took OOS AUROC to
+0.994; here, with one handwritten sentence per class, there is no threshold that
+both keeps in-scope traffic and rejects out-of-scope.
+
+At the 0.99 retention target `calibrate.py` uses, the fitted threshold collapses
+to 0.0597 — under the entire out-of-scope range — and rejects **nothing**. The
+script now warns when that happens, and defaults to 0.80 retention, the knee:
+
+```
+ thresh  in-scope kept  oos rejected
+   0.05        100.0%         0.0%
+   0.10         92.0%        22.7%
+   0.15         84.0%        63.6%
+   0.20         78.0%        81.8%  <- fitted (0.1937)
+   0.25         66.0%        95.5%
+   0.30         50.0%       100.0%
+```
+
+Example centroids were tried as a fix and did not rescue it: 6 hand-written
+examples per route, scored on the 20 held out, gave OOS AUROC 0.764 — *worse*
+than the description baseline. The examples are written by the same person as
+the descriptions and inherit the same blind spots, which is precisely what
+`evalset.py` exists to avoid. CLINC's examples are human-written and collected
+independently; these are not.
+
+**The honest reading:** the demo schema has no data behind it, so its thresholds
+rest on 72 strings written by the author of the engine. That is enough to place a
+threshold and not much more. The CLINC numbers in `README.md` are the ones that
+carry evidential weight.
+
+---
+
+# Build notes
+
+## fp16 costs nothing here
+
+Apple ships face *recognition* in a non-ANE build while face detection, quality
+and pose run on the ANE, which suggested fp16 might hurt threshold decisions on
+embeddings. For this workload it does not:
+
+```
+cosine(fp16 ANE, fp32 torch):  mean 0.99992, min 0.99942
+same top-1 route:              10/10
+max |delta p(top)|:            0.0033
+```
+
+That bounds the concern rather than dismissing it, and on a small sample —
+routing across 5 well-separated categories has huge margins, while recognition
+discriminates thousands of identities on tiny ones. Expect precision to matter as
+the label count grows.
+
+## Conversion
+
+Three things cost time, all in `build.py` / `minilm.py`:
+
+* **HuggingFace's `BertModel` will not convert.** Its attention-mask handling
+  emits an `aten::Int` cast coremltools cannot fold (`TypeError: only
+  0-dimensional arrays can be converted to Python scalars`). `minilm.py`
+  reimplements the forward pass; `build.py` verifies it against HF to cosine
+  0.99999994 and aborts if it drifts.
+* **Any `x.shape[1]` fails the same way** under tracing. Every shape is a
+  compile-time constant. This is the static-shape constraint showing up as a
+  build error rather than a runtime one.
+* **torch 2.14 is untested with coremltools 9.0** — pinned to 2.7.0.
+
+## Where the ops land
+
+`where.py` asks Core ML's own compute planner rather than inferring from timing:
+**157 of 166 ops (94.6%) on the `MLNeuralEngineComputeDevice`**. The nine on CPU
+are fp32↔fp16 casts plus the embedding `gather` — table lookup is not an ANE
+operation. Every matmul, softmax and layernorm is.
+
+The forward pass in `minilm.py` uses `nn.Linear` over `(B, T, H)` with
+`permute`/`reshape` for the attention heads, not Apple's `(B, C, 1, L)`
+four-dimensional convolution layout. It reaches 94.6% ANE residency anyway, so
+the layout is not a correctness issue — whether it is a *performance* issue is
+untested. See `NEXT_STEPS.md`.
