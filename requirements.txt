@@ -7,4 +7,7 @@ transformers==4.46.3     # tokenizer only at runtime
 torch==2.7.0             # 2.14 untested with coremltools 9.0
 
 # eval-only (evaluate.py / evalset.py)
-datasets>=3.0        # CLINC150
+datasets>=3.0        # CLINC150 and MASSIVE
+
+# demo-only (demos/bluesky); datasets already pulls this in
+aiohttp>=3.9         # Jetstream websocket

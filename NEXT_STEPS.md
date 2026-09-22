@@ -226,20 +226,15 @@ BERT-architecture encoders and a base BERT does ship one.
   would say the description-anchor failure is not fixable without training, which
   makes 16-example centroids the answer rather than a workaround.
 
-## 7. Energy per decision
+## ~~7. Energy per decision~~ — not pursued
 
-`laya-coreml` measures 0.1540 J on the ANE against 0.4288 J on a compiled MLX GPU
-path for the same model — **2.78× energy for only 1.39× latency.**
+`laya-coreml` reports 0.154 J on the ANE against 0.429 J on a compiled GPU path
+— 2.78x the energy for only 1.39x the latency — which is a real argument for the
+ANE and not the one this repo makes.
 
-`README.md` rests its case entirely on latency, which that comparison suggests is
-the weaker half. If the ANE's real argument is power, we are not making it.
-
-* **Effort:** unknown, and that is the problem. `powermetrics` needs sudo and
-  attributing joules to a 1.4 ms operation is hard — their numbers are
-  system-level, which is a much easier measurement and a much weaker one.
-* **Do it only if** the measurement can be made honestly. A system-level delta
-  over a long loop, clearly labelled as such, is acceptable. A per-decision joule
-  figure we cannot defend is worse than no figure.
+Dropped anyway, by decision on 2026-09-22: power is not what this project is
+demonstrating, and a per-decision joule figure at 1.4 ms could not have been
+defended without more measurement apparatus than the claim is worth.
 
 ## 8. ANE layout: `nn.Linear` vs. Apple's 4D convolution form
 

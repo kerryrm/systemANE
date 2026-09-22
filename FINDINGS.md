@@ -657,6 +657,46 @@ about the direction and wrong about the size:** going from 10 labels to 60 does
 move drift from zero to non-zero, and the magnitude is 0.03%, on a decision that
 was a coin flip in fp32 as well.
 
+## 1.4 ms is the saturated figure, not the isolated one
+
+`demos/bluesky` sees a link card roughly every 150 ms and measured **4.3 ms**
+per encode against a published 1.4 ms. The encoder is not slower there; it is
+cold. `warmup.py` sweeps the idle gap before a call and times only the call:
+
+| idle gap | CPU_AND_NE | CPU_ONLY | CPU_AND_GPU |
+|---|---|---|---|
+| 0 ms (tight loop) | **1.07** | 2.78 | 4.02 |
+| 1 ms | 1.54 | 3.05 | 5.05 |
+| 5 ms | 2.15 | 4.69 | 6.26 |
+| 20 ms | 2.44 | 10.02 | 7.36 |
+| 200 ms | **2.80** | 7.73 | 7.55 |
+
+A **1 ms** gap already costs 44%. It plateaus around 2.5-3x by 20 ms. So the
+headline number describes a saturated engine, and an application that decides
+something every few hundred milliseconds should expect roughly 3 ms.
+
+**The control is the interesting half, and it points the other way.** Every
+backend pays this — it is not an ANE quirk:
+
+```
+CPU_AND_NE    warm 1.07   cold 2.80   2.6x   (+1.74 ms)
+CPU_ONLY      warm 2.78   cold 7.73   2.8x   (+4.94 ms)
+CPU_AND_GPU   warm 4.02   cold 7.55   1.9x   (+3.53 ms)
+```
+
+The ANE pays the smallest absolute penalty of the three, so its lead holds when
+calls are sporadic — **2.8x over CPU and 2.7x over GPU at a 200 ms gap**,
+against 2.6x and 3.8x in a tight loop. Sporadic is how applications behave and
+tight loops are how benchmarks behave, so this is the more relevant comparison
+and the ANE wins it. (Absolute values move ±0.4 ms between runs; the ratios are
+stable.)
+
+It also corrects an attribution. *Serving it* below reports `serve.py` going
+from 225 req/s at one client to 708 at sixteen, explained there as the
+serialised encoder. That is part of it, but a large part is simply that
+concurrent requests keep the engine warm — at 708 req/s the gaps are 1.4 ms,
+which is the left-hand column of that table.
+
 ## The CPU-only path silently drops the normalisation
 
 Found while building `drift.py`, not while looking for it. `Encoder` takes a

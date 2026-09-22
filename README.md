@@ -66,6 +66,13 @@ Under load, `serve.py` does **708 req/s at 16 clients** on a laptop, p50
 GH200. Different work per decision and not a benchmark either side agreed to,
 but the shape of the difference is the point.
 
+**That 1.4 ms is the saturated figure.** Like every Core ML backend, the
+encoder goes cold between calls: a 1 ms gap costs 44%, and an application
+deciding something every few hundred milliseconds should expect ~3 ms. The ANE
+pays the smallest penalty of the three, so its lead *widens* when calls are
+sporadic — 2.8× over CPU and 2.7× over GPU at a 200 ms gap. `warmup.py` has the
+table.
+
 **What is not measured: energy.** `laya-coreml` reports 0.154 J per decision on
 the ANE against 0.429 J on a compiled GPU path — **2.78× the energy for only
 1.39× the latency** — which suggests the ANE's real argument is power, not
@@ -337,8 +344,11 @@ build.py              convert to encoder.mlpackage (verifies against HuggingFace
 build_encoder.py      compile any BERT-architecture encoder (--model, --pooling)
 where.py              per-op device assignment from Core ML's compute planner
 drift.py              fp16 ANE vs fp32 torch, measured on decisions
+warmup.py             what an idle gap costs, per compute unit
 serve.py              the System One API over HTTP (stdlib only)
 stability.py          determinism, and what irrelevant text costs
+
+demos/bluesky/        every link on Bluesky, sorted live on the ANE
 system1.py            Encoder + Choice / Boolean / Score primitives
 fmserve.py            minimal stdlib client for `fm serve` (tier 2)
 cascade.py            the two-tier demo
