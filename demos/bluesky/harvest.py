@@ -4,8 +4,9 @@ from urllib.parse import urlparse
 
 URL = "wss://jet.firehose.stream/tap?wantedCollections=app.bsky.feed.post"
 
-MULTI = {"co.uk", "com.br", "com.au", "co.jp", "co.nz", "com.mx", "go.jp",
-         "ne.jp", "or.jp", "co.za", "com.tr", "co.kr", "com.ar", "com.es"}
+MULTI = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.br", "com.au", "net.au",
+         "co.jp", "ne.jp", "or.jp", "go.jp", "co.nz", "com.mx", "co.za",
+         "com.tr", "co.kr", "com.ar", "com.es", "co.in", "com.sg"}
 
 def domain(u):
     h = (urlparse(u).netloc or "").lower().removeprefix("www.")

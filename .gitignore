@@ -11,3 +11,6 @@ bgebase_tok/
 __pycache__/
 .DS_Store
 .evalcache/
+
+# screen captures: the compressed .mp4 is committed, the original is not
+*.mov

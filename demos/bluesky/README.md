@@ -21,6 +21,17 @@ about 63% of the tail. The 90% point (0.195) lets borderline junk through:
 below reproduce without re-harvesting. Needs `aiohttp`, which the venv already
 has via `datasets`.
 
+**[▶ ANE-jetstreaming.mp4](ANE-jetstreaming.mp4)** — 24 seconds of it running.
+`rule` marks a link whose domain is in the table below; `new` marks one the
+encoder placed from the card text alone, which is most of them.
+
+The errors are in there too, and they are the ones the numbers predict. A book
+listing — *"Continental Drift by Mai-Linh Hong"* — goes to `music`, because
+"title by person" is exactly how a song is credited. A French headline about
+planetary boundaries goes to `video` at 0.27, barely over the threshold. At
+0.82 accuracy roughly one row in five is wrong, and watching which ones is more
+informative than the number.
+
 ## The stream
 
 [Jetstream](https://jet.firehose.stream/) re-emits the ATProto relay as plain
